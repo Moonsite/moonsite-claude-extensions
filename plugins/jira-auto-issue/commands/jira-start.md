@@ -1,5 +1,5 @@
 ---
-name: start
+name: jira-start
 description: Start tracking a Jira task (create new or link existing)
 argument: Issue key (e.g. PROJ-42) or summary text to create a new issue
 allowed-tools: Bash, Write, Read, ToolSearch, mcp__atlassian__createJiraIssue, mcp__atlassian__getJiraIssue
@@ -16,17 +16,16 @@ You are starting work on a Jira task. Read the project config from `<project-roo
 
 ## Link to Existing Issue
 
-1. Use `mcp__atlassian__getJiraIssue` to fetch the issue details (load tool via ToolSearch first)
+1. Try `mcp__atlassian__getJiraIssue` first (load tool via ToolSearch). If MCP fails, fall back to REST:
+   ```bash
+   source <plugin-root>/hooks-handlers/jira-rest.sh
+   jira_load_creds "<project-root>"
+   jira_get_issue "<ISSUE_KEY>"
+   ```
 2. Record start time: run `date +%s`
-3. Write `<project-root>/.claude/current-task.json`:
-```json
-{
-  "issueKey": "<KEY>",
-  "summary": "<issue summary from Jira>",
-  "startTime": <unix_timestamp>,
-  "branch": "<current_branch>"
-}
-```
+3. Update session state in `<project-root>/.claude/jira-session.json`:
+   - Add issue to `activeIssues` with summary, startTime, totalSeconds: 0
+   - Set `currentIssue` to this key
 4. If not on a matching feature branch, create one:
    ```bash
    git checkout -b feature/<KEY>-<slug>
@@ -35,12 +34,16 @@ You are starting work on a Jira task. Read the project config from `<project-roo
 
 ## Create New Issue
 
-1. Use `mcp__atlassian__createJiraIssue` to create a Task with the given summary (load tool via ToolSearch first)
-   - Use `cloudId` and `projectKey` from config
-   - `issueTypeName`: "Task"
-   - `summary`: the argument text
+1. Try `mcp__atlassian__createJiraIssue` first (load via ToolSearch). If MCP fails, fall back to REST:
+   ```bash
+   source <plugin-root>/hooks-handlers/jira-rest.sh
+   jira_load_creds "<project-root>"
+   jira_create_issue "<PROJECT_KEY>" "<summary>"
+   ```
 2. Follow steps 2-5 from "Link to Existing Issue" above with the newly created key
 
 ## If a task is already active
 
-Check if `<project-root>/.claude/current-task.json` exists. If so, warn the user and ask if they want to stop the current task first (log time) before starting a new one.
+Check `currentIssue` in `<project-root>/.claude/jira-session.json`. If set, ask the user if they want to:
+- Switch to the new issue (pause timer on current)
+- Stop the current task first (log time) before starting new one

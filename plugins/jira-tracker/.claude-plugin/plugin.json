@@ -1,8 +1,0 @@
-{
-  "name": "jira-tracker",
-  "version": "1.0.0",
-  "description": "Automatic Jira issue tracking and time logging for Claude Code sessions",
-  "author": {
-    "name": "Boris Sigalov"
-  }
-}
