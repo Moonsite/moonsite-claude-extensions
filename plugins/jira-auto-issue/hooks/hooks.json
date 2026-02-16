@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start-check.sh"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/post-tool-use.sh",
+        "async": true
+      }
+    ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre-tool-use.sh"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/stop.sh"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-end.sh"
+      }
+    ]
+  }
+}

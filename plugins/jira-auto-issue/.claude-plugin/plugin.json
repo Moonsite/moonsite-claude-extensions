@@ -1,0 +1,8 @@
+{
+  "name": "jira-auto-issue",
+  "version": "2.0.0",
+  "description": "Automatic Jira issue tracking, work documentation, and time logging for Claude Code sessions",
+  "author": {
+    "name": "Boris Sigalov"
+  }
+}
