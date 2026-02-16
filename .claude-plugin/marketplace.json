@@ -1,0 +1,32 @@
+{
+  "name": "claude-code-jira-tracker",
+  "owner": {
+    "name": "Moonsite",
+    "url": "https://github.com/Moonsite"
+  },
+  "metadata": {
+    "description": "Automatic Jira issue tracking and time logging for Claude Code sessions",
+    "version": "1.0.0",
+    "homepage": "https://github.com/Moonsite/claude-code-jira-tracker"
+  },
+  "plugins": [
+    {
+      "name": "jira-tracker",
+      "source": "./plugins/jira-tracker",
+      "description": "Automatic Jira issue tracking and time logging for Claude Code sessions",
+      "version": "1.0.0",
+      "author": {
+        "name": "Boris Sigalov"
+      },
+      "category": "workflow",
+      "homepage": "https://github.com/Moonsite/claude-code-jira-tracker",
+      "keywords": [
+        "jira",
+        "tracking",
+        "time-logging",
+        "atlassian",
+        "productivity"
+      ]
+    }
+  ]
+}
