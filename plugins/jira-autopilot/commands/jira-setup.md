@@ -4,19 +4,19 @@ description: Configure Jira tracking for this project
 allowed-tools: Bash, Write, Edit, Read, AskUserQuestion, Glob
 ---
 
-# Jira Auto-Issue Setup
+# Jira Autopilot Setup
 
-You are configuring the jira-auto-issue plugin for this project.
+You are configuring the jira-autopilot plugin for this project.
 
 ## Steps
 
 1. **Auto-detect project key from git history** — Before asking the user, try to detect the project key automatically:
-   - Run: `bash plugins/jira-auto-issue/hooks-handlers/helpers.sh detect_project_key` (or inline the logic: scan `git log --oneline -100` and `git branch -a` for patterns matching `[A-Z]+-\d+`, extract the most common prefixes)
+   - Run: `bash plugins/jira-autopilot/hooks-handlers/helpers.sh detect_project_key` (or inline the logic: scan `git log --oneline -100` and `git branch -a` for patterns matching `[A-Z]+-\d+`, extract the most common prefixes)
    - If keys are detected, present them as choices: "I found these project keys in your git history:" and list them. Let the user pick one or type a different key.
    - If no keys are detected, ask normally: "What's your Jira project key? (the prefix before the dash in issue numbers, e.g. PROJ from PROJ-123)"
 
 2. **Check for saved global credentials** — Before asking for URL and credentials:
-   - Check if `~/.claude/jira-tracker.global.json` exists and contains `baseUrl`, `email`, `apiToken`.
+   - Check if `~/.claude/jira-autopilot.global.json` exists and contains `baseUrl`, `email`, `apiToken`.
    - If it does, show the saved baseUrl and email (NOT the token) and ask: "Found saved Jira credentials for **user@company.com** at **https://company.atlassian.net**. Use these? (yes/no)"
    - If the user says yes, skip steps 3-4 and reuse the saved values.
    - If the user says no, or the file doesn't exist, continue with steps 3-4 below.
@@ -45,7 +45,7 @@ You are configuring the jira-auto-issue plugin for this project.
    - Ask if these defaults are OK or if the user wants to change any.
 
 7. **Write config files**:
-   - `<project-root>/.claude/jira-tracker.json` (committed to repo):
+   - `<project-root>/.claude/jira-autopilot.json` (committed to repo):
      ```json
      {
        "projectKey": "<KEY>",
@@ -57,7 +57,7 @@ You are configuring the jira-auto-issue plugin for this project.
        "autoCreate": false
      }
      ```
-   - `<project-root>/.claude/jira-tracker.local.json` (gitignored, contains secrets):
+   - `<project-root>/.claude/jira-autopilot.local.json` (gitignored, contains secrets):
      ```json
      {
        "email": "<EMAIL>",
@@ -68,7 +68,7 @@ You are configuring the jira-auto-issue plugin for this project.
 
 8. **Offer to save credentials globally**:
    - Ask: "Save these credentials globally so you don't have to re-enter them for other projects? (yes/no)"
-   - If yes, write `~/.claude/jira-tracker.global.json`:
+   - If yes, write `~/.claude/jira-autopilot.global.json`:
      ```json
      {
        "email": "<EMAIL>",
@@ -83,15 +83,15 @@ You are configuring the jira-auto-issue plugin for this project.
    .claude/current-task.json
    .claude/jira-session.json
    .claude/jira-sessions/
-   .claude/jira-tracker.local.json
-   .claude/jira-tracker.declined
+   .claude/jira-autopilot.local.json
+   .claude/jira-autopilot.declined
    ```
 
-10. **Remove** `.claude/jira-tracker.declined` if it exists.
+10. **Remove** `.claude/jira-autopilot.declined` if it exists.
 
 11. **Confirm** setup is complete and show saved configuration summary.
 
 ## Notes
-- If `.claude/jira-tracker.json` already exists, show current values and ask what to change.
+- If `.claude/jira-autopilot.json` already exists, show current values and ask what to change.
 - The `{key}` placeholder in patterns gets replaced with the actual project key at runtime.
 - NEVER commit or display the API token in output after initial setup.

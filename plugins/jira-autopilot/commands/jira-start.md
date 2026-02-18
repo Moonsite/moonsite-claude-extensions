@@ -7,7 +7,7 @@ allowed-tools: Bash, Write, Read, ToolSearch, mcp__atlassian__createJiraIssue, m
 
 # Start Jira Task
 
-You are starting work on a Jira task. Read the project config from `<project-root>/.claude/jira-tracker.json` first.
+You are starting work on a Jira task. Read the project config from `<project-root>/.claude/jira-autopilot.json` first.
 
 ## Parse the argument
 

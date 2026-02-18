@@ -1,4 +1,4 @@
-# jira-auto-issue
+# jira-autopilot
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that automatically tracks, documents, and logs your work to Jira. Every task done in Claude Code gets captured — files changed, time spent, work summaries — and posted to your Jira board with minimal manual intervention.
 
@@ -24,14 +24,14 @@ Adding Jira instructions to `CLAUDE.md` works until Claude forgets them. This pl
 ### Option 1: Clone to local plugins directory
 
 ```bash
-git clone https://github.com/Moonsite/claude-code-jira-tracker.git ~/.claude/plugins/local/jira-auto-issue
+git clone https://github.com/Moonsite/claude-code-jira-tracker.git ~/.claude/plugins/local/jira-autopilot
 ```
 
 ### Option 2: Manual download
 
 ```bash
-mkdir -p ~/.claude/plugins/local/jira-auto-issue
-cd ~/.claude/plugins/local/jira-auto-issue
+mkdir -p ~/.claude/plugins/local/jira-autopilot
+cd ~/.claude/plugins/local/jira-autopilot
 # Copy plugin files here
 ```
 
@@ -40,10 +40,10 @@ cd ~/.claude/plugins/local/jira-auto-issue
 Add to `~/.claude/plugins/installed_plugins.json` inside the `"plugins"` object:
 
 ```json
-"jira-auto-issue@local": [
+"jira-autopilot@local": [
   {
     "scope": "user",
-    "installPath": "/Users/<you>/.claude/plugins/local/jira-auto-issue",
+    "installPath": "/Users/<you>/.claude/plugins/local/jira-autopilot",
     "version": "2.0.0",
     "installedAt": "2026-01-01T00:00:00.000Z",
     "lastUpdated": "2026-01-01T00:00:00.000Z"
@@ -54,7 +54,7 @@ Add to `~/.claude/plugins/installed_plugins.json` inside the `"plugins"` object:
 Add to `~/.claude/settings.json` inside `"enabledPlugins"`:
 
 ```json
-"jira-auto-issue@local": true
+"jira-autopilot@local": true
 ```
 
 ## Quick Start
@@ -169,7 +169,7 @@ When the session ends, the hook automatically:
 
 ### Project config (committed, shared with team)
 
-`<project-root>/.claude/jira-tracker.json`:
+`<project-root>/.claude/jira-autopilot.json`:
 
 ```json
 {
@@ -195,7 +195,7 @@ When the session ends, the hook automatically:
 
 ### Credentials (gitignored, per-developer)
 
-`<project-root>/.claude/jira-tracker.local.json`:
+`<project-root>/.claude/jira-autopilot.local.json`:
 
 ```json
 {
@@ -225,7 +225,7 @@ Logged time is always rounded **up** to the nearest increment (default 15 minute
 ## Plugin Structure
 
 ```
-jira-auto-issue/
+jira-autopilot/
 ├── .claude-plugin/
 │   └── plugin.json                 # Plugin metadata
 ├── commands/
@@ -255,7 +255,7 @@ jira-auto-issue/
 
 **"No active Jira task"** — Either run `/jira-start` manually, or name your branch with the issue key: `feature/MYPROJ-42-description`.
 
-**Time not logging at session end** — Ensure `.claude/jira-tracker.local.json` exists with valid email, apiToken, and baseUrl. Test with: `source hooks-handlers/jira-rest.sh && jira_load_creds . && jira_test_connection`
+**Time not logging at session end** — Ensure `.claude/jira-autopilot.local.json` exists with valid email, apiToken, and baseUrl. Test with: `source hooks-handlers/jira-rest.sh && jira_load_creds . && jira_test_connection`
 
 **MCP tools not available** — The plugin falls back to REST API automatically. Ensure credentials are configured via `/jira-setup`.
 

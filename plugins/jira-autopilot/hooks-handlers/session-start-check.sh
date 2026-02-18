@@ -6,14 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/helpers.sh"
 
 ROOT=$(find_project_root) || exit 0
-CONFIG="$ROOT/.claude/jira-tracker.json"
-DECLINED="$ROOT/.claude/jira-tracker.declined"
+CONFIG="$ROOT/.claude/jira-autopilot.json"
+DECLINED="$ROOT/.claude/jira-autopilot.declined"
 SESSION_FILE=$(session_file "$ROOT")
 
 # No config exists
 if [[ ! -f "$CONFIG" ]]; then
   if [[ ! -f "$DECLINED" ]]; then
-    echo "[jira-auto-issue] Not configured. Run /jira-setup to configure."
+    echo "[jira-autopilot] Not configured. Run /jira-setup to configure."
     touch "$DECLINED"
   fi
   exit 0
@@ -35,7 +35,7 @@ fi
 OLD_TASK=$(task_file "$ROOT")
 if [[ -f "$OLD_TASK" ]]; then
   if migrate_old_task "$ROOT"; then
-    echo "[jira-auto-issue] Migrated old task state to new session format."
+    echo "[jira-autopilot] Migrated old task state to new session format."
   fi
 fi
 
@@ -72,7 +72,7 @@ start = info.get('startTime', int(time.time()))
 elapsed = total + (int(time.time()) - start)
 print(elapsed // 60)
 ")
-    echo "[jira-auto-issue] Active: $ISSUE_KEY (${ELAPSED}m). /jira-status for details, /jira-stop to log time."
+    echo "[jira-autopilot] Active: $ISSUE_KEY (${ELAPSED}m). /jira-status for details, /jira-stop to log time."
     exit 0
   fi
 
@@ -91,16 +91,16 @@ data['activeIssues']['$ISSUE_KEY'] = {
 data['currentIssue'] = '$ISSUE_KEY'
 with open(f, 'w') as fh: json.dump(data, fh, indent=2)
 "
-  echo "[jira-auto-issue] Detected $ISSUE_KEY from branch. Timer started. /jira-status for details."
+  echo "[jira-autopilot] Detected $ISSUE_KEY from branch. Timer started. /jira-status for details."
   exit 0
 fi
 
 # Check for existing active issues
 CURRENT=$(json_get "$SESSION_FILE" "currentIssue")
 if [[ -n "$CURRENT" && "$CURRENT" != "None" ]]; then
-  echo "[jira-auto-issue] Active: $CURRENT. /jira-status for details, /jira-stop to log time."
+  echo "[jira-autopilot] Active: $CURRENT. /jira-status for details, /jira-stop to log time."
   exit 0
 fi
 
 # No task detected
-echo "[jira-auto-issue] No active Jira task. Use /jira-start <KEY> or /jira-start <summary> to begin."
+echo "[jira-autopilot] No active Jira task. Use /jira-start <KEY> or /jira-start <summary> to begin."

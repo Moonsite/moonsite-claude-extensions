@@ -3,4 +3,6 @@
 .claude/jira-session.json
 .claude/jira-sessions/
 .claude/jira-tracker.local.json
+.claude/jira-autopilot.local.json
 .claude/jira-tracker.declined
+.claude/jira-autopilot.declined

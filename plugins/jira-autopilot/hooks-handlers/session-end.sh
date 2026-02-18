@@ -26,7 +26,7 @@ with open(sf) as f:
 
 active = data.get('activeIssues', {})
 chunks = data.get('workChunks', [])
-config_f = os.path.join(root, '.claude', 'jira-tracker.json')
+config_f = os.path.join(root, '.claude', 'jira-autopilot.json')
 rounding = 15
 if os.path.exists(config_f):
     with open(config_f) as f:
@@ -88,7 +88,7 @@ for r in results:
 
   # Log time
   if jira_log_time "$KEY" "$SECONDS" >/dev/null 2>&1; then
-    echo "[jira-auto-issue] Logged ${ROUNDED}m to $KEY (actual: ${ACTUAL}m)"
+    echo "[jira-autopilot] Logged ${ROUNDED}m to $KEY (actual: ${ACTUAL}m)"
   fi
 
   # Post summary comment

@@ -57,7 +57,7 @@ if not current and files_changed:
     file_list = ', '.join(os.path.basename(f) for f in files_changed[:5])
     if len(files_changed) > 5:
         file_list += f' (+{len(files_changed)-5} more)'
-    print(f'[jira-auto-issue] Work detected but no active issue. Files: {file_list}. Use /jira-start to link or /jira-approve to create.')
+    print(f'[jira-autopilot] Work detected but no active issue. Files: {file_list}. Use /jira-start to link or /jira-approve to create.')
 
 with open(sf, 'w') as f:
     json.dump(data, f, indent=2)

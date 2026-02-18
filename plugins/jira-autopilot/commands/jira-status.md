@@ -41,7 +41,7 @@ Show the current session tracking status across all active issues.
    Activity buffer: <N> items
    ```
 
-5. **Read config** from `<project-root>/.claude/jira-tracker.json` and show project key + time rounding setting.
+5. **Read config** from `<project-root>/.claude/jira-autopilot.json` and show project key + time rounding setting.
 
 6. **Show tips**:
    - `/jira-start <KEY>` to switch to a different issue

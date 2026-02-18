@@ -11,10 +11,10 @@
   },
   "plugins": [
     {
-      "name": "jira-auto-issue",
-      "source": "./plugins/jira-auto-issue",
-      "description": "Automatic Jira issue tracking, work documentation, and time logging for Claude Code sessions",
-      "version": "2.0.0",
+      "name": "jira-autopilot",
+      "source": "./plugins/jira-autopilot",
+      "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
+      "version": "3.0.0",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -26,7 +26,8 @@
         "time-logging",
         "atlassian",
         "productivity",
-        "auto-issue"
+        "autopilot",
+        "autonomous"
       ]
     }
   ]

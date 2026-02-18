@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared utilities for jira-auto-issue hooks
+# Shared utilities for jira-autopilot hooks
 
 # Find project root by walking up from CWD looking for .git
 find_project_root() {
@@ -54,8 +54,8 @@ with open(f, 'w') as fh: json.dump(data, fh, indent=2)
 # Check if tracker is enabled (config exists, enabled=true, no local override)
 is_enabled() {
   local root="$1"
-  local config="$root/.claude/jira-tracker.json"
-  local local_config="$root/.claude/jira-tracker.local.json"
+  local config="$root/.claude/jira-autopilot.json"
+  local local_config="$root/.claude/jira-autopilot.local.json"
 
   [[ ! -f "$config" ]] && return 1
 
@@ -76,7 +76,7 @@ is_enabled() {
 # Extract issue key from current git branch
 extract_issue_from_branch() {
   local root="$1"
-  local config="$root/.claude/jira-tracker.json"
+  local config="$root/.claude/jira-autopilot.json"
   local branch
   branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)
   [[ -z "$branch" ]] && return 1
@@ -129,13 +129,13 @@ with open(sys.argv[2], 'w') as f:
 }
 
 # Global config path
-GLOBAL_CONFIG="$HOME/.claude/jira-tracker.global.json"
+GLOBAL_CONFIG="$HOME/.claude/jira-autopilot.global.json"
 
 # Load a credential field with fallback: project-local → global
 # Usage: load_cred_field <project_root> <field_name>
 load_cred_field() {
   local root="$1" field="$2"
-  local local_config="$root/.claude/jira-tracker.local.json"
+  local local_config="$root/.claude/jira-autopilot.local.json"
   local val=""
 
   # Try project-local first

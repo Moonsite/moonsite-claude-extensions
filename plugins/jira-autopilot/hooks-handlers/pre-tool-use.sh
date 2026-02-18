@@ -30,4 +30,4 @@ CURRENT=$(json_get "$SESSION_FILE" "currentIssue")
 echo "$COMMAND" | grep -q "$CURRENT" && exit 0
 
 # Suggest including issue key
-echo "[jira-auto-issue] Active issue: $CURRENT. Consider including in commit message: $CURRENT: <message>"
+echo "[jira-autopilot] Active issue: $CURRENT. Consider including in commit message: $CURRENT: <message>"

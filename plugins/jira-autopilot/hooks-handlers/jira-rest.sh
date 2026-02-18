@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/helpers.sh"
 
 jira_load_creds() {
   local root="$1"
-  local config="$root/.claude/jira-tracker.json"
+  local config="$root/.claude/jira-autopilot.json"
 
   [[ ! -f "$config" ]] && { echo "ERROR: Missing $config — run /jira-setup" >&2; return 1; }
 
