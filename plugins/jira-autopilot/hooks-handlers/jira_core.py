@@ -584,8 +584,92 @@ def cmd_build_worklog(args):
     print(json.dumps(result))
 
 
-# Stubs — implemented in subsequent tasks
-def cmd_session_end(args): pass
+def _round_seconds(seconds: int, rounding_minutes: int, accuracy: int) -> int:
+    """Round seconds to rounding_minutes increments, scaled by accuracy."""
+    if seconds <= 0:
+        return 0
+    # High accuracy → finer rounding
+    if accuracy >= 8:
+        rounding = max(rounding_minutes // 15, 1)  # 1-min granularity
+    elif accuracy <= 3:
+        rounding = rounding_minutes * 2
+    else:
+        rounding = rounding_minutes
+    rounding_secs = rounding * 60
+    return max(math.ceil(seconds / rounding_secs) * rounding_secs, rounding_secs)
+
+
+def cmd_session_end(args):
+    root = args[0] if args else "."
+    cfg = load_config(root)
+    session = load_session(root)
+    if not session:
+        return
+
+    autonomy = session.get("autonomyLevel", cfg.get("autonomyLevel", "C"))
+    accuracy = session.get("accuracy", cfg.get("accuracy", 5))
+    time_rounding = cfg.get("timeRounding", 15)
+    debug = cfg.get("debugLog", False)
+
+    # Drain any remaining activity buffer first
+    buffer = session.get("activityBuffer", [])
+    if buffer:
+        cmd_drain_buffer(args)
+        session = load_session(root)
+
+    pending = session.get("pendingWorklogs", [])
+    active_issues = session.get("activeIssues", {})
+
+    for issue_key, issue_data in active_issues.items():
+        worklog = build_worklog(root, issue_key)
+        raw_seconds = worklog["seconds"]
+
+        if raw_seconds <= 0:
+            # Check if there's wallclock time even without chunks
+            start = issue_data.get("startTime", 0)
+            if start > 0:
+                raw_seconds = int(time.time()) - start
+            if raw_seconds <= 0:
+                continue
+
+        rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
+
+        entry = {
+            "issueKey": issue_key,
+            "seconds": rounded,
+            "summary": worklog["summary"],
+            "rawFacts": worklog["rawFacts"],
+            "status": "pending" if autonomy == "C" else "approved",
+        }
+        pending.append(entry)
+
+        debug_log(
+            f"issue={issue_key} raw={raw_seconds}s rounded={rounded}s "
+            f"autonomy={autonomy}",
+            category="session-end",
+            enabled=debug,
+        )
+
+    session["pendingWorklogs"] = pending
+
+    # Archive session
+    archive_dir = os.path.join(root, ".claude", "jira-sessions")
+    os.makedirs(archive_dir, exist_ok=True)
+    session_id = session.get("sessionId", datetime.now().strftime("%Y%m%d-%H%M%S"))
+    archive_path = os.path.join(archive_dir, f"{session_id}.json")
+    with open(archive_path, "w") as f:
+        json.dump(session, f, indent=2)
+
+    save_session(root, session)
+
+    debug_log(
+        f"Session ended, archived to {archive_path}",
+        category="session-end",
+        enabled=debug,
+    )
+
+
+# Stub — implemented in subsequent task
 def cmd_suggest_parent(args): pass
 
 

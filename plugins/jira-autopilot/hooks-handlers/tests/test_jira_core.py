@@ -21,6 +21,7 @@ from jira_core import (
     cmd_drain_buffer,
     classify_issue,
     build_worklog,
+    cmd_session_end,
 )
 
 
@@ -515,3 +516,140 @@ class TestBuildWorklog:
         result = build_worklog(str(tmp_path), "TEST-1")
         assert result["seconds"] == 0
         assert result["rawFacts"]["activityCount"] == 0
+
+
+# ── Task 1.7: session-end ────────────────────────────────────────────────
+
+
+class TestSessionEnd:
+    def test_builds_pending_worklogs_autonomy_c(self, tmp_path):
+        """Autonomy C: worklogs go to pendingWorklogs, not auto-posted."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5,
+            "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "test", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                "TEST-1": {"startTime": now - 1800, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [{
+                "id": "c1", "issueKey": "TEST-1",
+                "startTime": now - 1800, "endTime": now,
+                "filesChanged": ["a.ts"],
+                "activities": [{"tool": "Edit", "type": "file_edit"}] * 5,
+                "idleGaps": [],
+            }],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert len(updated.get("pendingWorklogs", [])) > 0
+        assert updated["pendingWorklogs"][0]["status"] == "pending"
+        assert updated["pendingWorklogs"][0]["issueKey"] == "TEST-1"
+
+    def test_rounds_time_per_config(self, tmp_path):
+        """Time should be rounded per timeRounding setting."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5,
+            "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        # 25 minutes of work → should round to 30 min (15-min increments)
+        session = {
+            "sessionId": "test", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                "TEST-1": {"startTime": now - 1500, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [{
+                "id": "c1", "issueKey": "TEST-1",
+                "startTime": now - 1500, "endTime": now,
+                "filesChanged": ["a.ts"],
+                "activities": [{"tool": "Edit", "type": "file_edit"}],
+                "idleGaps": [],
+            }],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        pending = updated["pendingWorklogs"][0]
+        # 25 min → rounded to 30 min (1800s) with 15-min rounding
+        assert pending["seconds"] % (15 * 60) == 0
+
+    def test_archives_session(self, tmp_path):
+        """Session should be archived after end."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        sessions_dir = claude_dir / "jira-sessions"
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5,
+            "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "test-archive", "currentIssue": None,
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {},
+            "workChunks": [],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        # Archived session should exist
+        assert sessions_dir.exists()
+        archives = list(sessions_dir.glob("*.json"))
+        assert len(archives) >= 1
+
+    def test_handles_multiple_issues(self, tmp_path):
+        """Multiple active issues should each get a pending worklog."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5,
+            "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "test", "currentIssue": "TEST-2",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                "TEST-1": {"startTime": now - 3600, "totalSeconds": 0, "paused": False},
+                "TEST-2": {"startTime": now - 1800, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [
+                {
+                    "id": "c1", "issueKey": "TEST-1",
+                    "startTime": now - 3600, "endTime": now - 1800,
+                    "filesChanged": ["a.ts"],
+                    "activities": [{"tool": "Edit", "type": "file_edit"}] * 3,
+                    "idleGaps": [],
+                },
+                {
+                    "id": "c2", "issueKey": "TEST-2",
+                    "startTime": now - 1800, "endTime": now,
+                    "filesChanged": ["b.ts"],
+                    "activities": [{"tool": "Edit", "type": "file_edit"}] * 2,
+                    "idleGaps": [],
+                },
+            ],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        issue_keys = {w["issueKey"] for w in updated["pendingWorklogs"]}
+        assert "TEST-1" in issue_keys
+        assert "TEST-2" in issue_keys
