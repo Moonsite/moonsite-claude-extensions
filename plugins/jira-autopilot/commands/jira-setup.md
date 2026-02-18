@@ -22,7 +22,7 @@ You are configuring the jira-autopilot plugin for this project.
    - If the user says yes, skip steps 3-4 and reuse the saved values.
    - If the user says no, or the file doesn't exist, continue with steps 3-4 below.
 
-3. **Ask for Jira base URL** — Ask the user to type their Jira base URL. Do NOT suggest specific URLs or provide example domain names — just ask for the URL as free text. Validate it looks like a URL starting with `https://`.
+3. **Ask for Jira base URL** — Ask the user in plain text (NOT using AskUserQuestion): "What's your Jira base URL? (e.g. https://yourcompany.atlassian.net)". Let them type it directly. Do NOT present options or menus — just wait for them to type the URL. Validate it looks like a URL starting with `https://`.
    - Auto-fetch Cloud ID: run `curl -s <baseUrl>/_edge/tenant_info` and extract `cloudId` from JSON response using `python3 -c "import json,sys; print(json.load(sys.stdin).get('cloudId',''))"`.
    - If fetch fails, ask the user for cloudId manually.
 
