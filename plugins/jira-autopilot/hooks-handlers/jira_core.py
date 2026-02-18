@@ -27,6 +27,8 @@ MAX_LOG_SIZE = 1_000_000  # 1MB
 READ_ONLY_TOOLS = frozenset([
     "Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
     "TodoRead", "NotebookRead", "AskUserQuestion",
+    "TaskList", "TaskGet", "ToolSearch", "Skill",
+    "ListMcpResourcesTool", "BashOutput",
 ])
 
 BUG_SIGNALS = [
@@ -203,6 +205,11 @@ def cmd_session_start(args):
         # Always sync autonomy/accuracy from config (may have changed via /jira-setup)
         existing["autonomyLevel"] = cfg.get("autonomyLevel", "C")
         existing["accuracy"] = cfg.get("accuracy", 5)
+        # Ensure activeTasks exists (may be missing in older sessions)
+        existing.setdefault("activeTasks", {})
+        # Assign sessionId if missing (sessions created by /jira-start may lack one)
+        if not existing.get("sessionId"):
+            existing["sessionId"] = datetime.now().strftime("%Y%m%d-%H%M%S")
         # Sanitize any credentials that may have been logged before the fix
         _sanitize_session_commands(existing)
         save_session(root, existing)
@@ -226,6 +233,7 @@ def cmd_session_start(args):
         "workChunks": [],
         "pendingWorklogs": [],
         "activityBuffer": [],
+        "activeTasks": {},
     }
 
     # Detect issue from branch name
@@ -313,11 +321,15 @@ def cmd_log_activity(args):
 
     tool_name = tool_data.get("tool_name", "")
     tool_input = tool_data.get("tool_input", {})
+    tool_response = tool_data.get("tool_response", {})
+    if not isinstance(tool_response, dict):
+        tool_response = {}
 
     # Skip read-only tools
     if tool_name in READ_ONLY_TOOLS:
         return
 
+    cfg = load_config(root)
     activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
     file_path = tool_input.get("file_path", "")
     command = tool_input.get("command", "")
@@ -340,15 +352,97 @@ def cmd_log_activity(args):
     buffer = session.get("activityBuffer", [])
     buffer.append(activity)
     session["activityBuffer"] = buffer
+
+    # Track task start/completion for per-task time logging
+    if tool_name in ("TaskCreate", "TaskUpdate"):
+        _handle_task_event(root, session, tool_name, tool_input, tool_response, cfg)
+
     save_session(root, session)
 
-    cfg = load_config(root)
     debug_log(
         f"tool={tool_name} file={file_path}",
         category="log-activity",
         enabled=cfg.get("debugLog", False),
         issueKey=session.get("currentIssue", ""),
     )
+
+
+def _create_jira_issue(base_url: str, email: str, api_token: str,
+                        project_key: str, summary: str, parent_key: str) -> "str | None":
+    """Create a Jira sub-task under parent_key. Returns new issue key or None."""
+    url = f"{base_url.rstrip('/')}/rest/api/3/issue"
+    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+    payload = json.dumps({
+        "fields": {
+            "project": {"key": project_key},
+            "parent": {"key": parent_key},
+            "summary": summary,
+            "issuetype": {"name": "Subtask"},
+        }
+    }).encode()
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Authorization", f"Basic {auth}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            return data.get("key")
+    except Exception:
+        return None
+
+
+def _log_task_time(root: str, session: dict, cfg: dict, subject: str, seconds: int):
+    """Log time for a completed task to a sub-issue (accuracy>=8) or the parent issue."""
+    accuracy = session.get("accuracy", cfg.get("accuracy", 5))
+    base_url = get_cred(root, "baseUrl")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+    current_issue = session.get("currentIssue")
+    debug = cfg.get("debugLog", False)
+    if not (base_url and email and api_token):
+        return
+    if accuracy >= 8 and current_issue:
+        project_key = cfg.get("projectKey", current_issue.split("-")[0])
+        new_key = _create_jira_issue(base_url, email, api_token, project_key, subject, current_issue)
+        if new_key:
+            post_worklog_to_jira(base_url, email, api_token, new_key, seconds, subject)
+            debug_log(
+                f"task='{subject}' created={new_key} logged={seconds}s",
+                category="task-worklog",
+                enabled=debug,
+            )
+            return
+    if current_issue:
+        post_worklog_to_jira(base_url, email, api_token, current_issue, seconds, subject)
+        debug_log(
+            f"task='{subject}' logged={seconds}s to {current_issue}",
+            category="task-worklog",
+            enabled=debug,
+        )
+
+
+def _handle_task_event(root: str, session: dict, tool_name: str,
+                        tool_input: dict, tool_response: dict, cfg: dict):
+    """Track task start/completion for per-task time logging."""
+    resp = tool_response if isinstance(tool_response, dict) else {}
+    task_id = str(resp.get("taskId") or tool_input.get("taskId", ""))
+    subject = resp.get("subject", "")
+    status = resp.get("status", "") or tool_input.get("status", "")
+    if not task_id or not status:
+        return
+    active_tasks = session.setdefault("activeTasks", {})
+    if status == "in_progress" and task_id not in active_tasks:
+        active_tasks[task_id] = {
+            "subject": subject,
+            "startTime": int(time.time()),
+            "jiraKey": None,
+        }
+    elif status == "completed" and task_id in active_tasks:
+        task = active_tasks.pop(task_id)
+        elapsed = int(time.time()) - task["startTime"]
+        if elapsed >= 60:
+            _log_task_time(root, session, cfg, task.get("subject") or subject, elapsed)
 
 
 def _get_idle_threshold_seconds(cfg: dict) -> int:
@@ -673,9 +767,16 @@ def cmd_session_end(args):
         raw_seconds = worklog["seconds"]
 
         if raw_seconds <= 0:
-            # Check if there's wallclock time even without chunks
+            # Fallback to wallclock only when there's evidence of real activity.
+            # Buffer has already been drained above, so check work chunks.
+            # Without this guard, auto-detected branch issues with no actual work
+            # would report the entire elapsed wall time (e.g. 42 hours).
+            has_chunks = any(
+                c.get("issueKey") == issue_key
+                for c in session.get("workChunks", [])
+            )
             start = issue_data.get("startTime", 0)
-            if start > 0:
+            if start > 0 and has_chunks:
                 raw_seconds = int(time.time()) - start
             if raw_seconds <= 0:
                 continue

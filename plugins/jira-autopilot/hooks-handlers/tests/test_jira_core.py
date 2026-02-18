@@ -3,6 +3,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -14,6 +16,7 @@ from jira_core import (
     SESSION_NAME,
     debug_log,
     load_config,
+    load_global_config,
     load_local_config,
     load_session,
     save_session,
@@ -27,6 +30,18 @@ from jira_core import (
     cmd_post_worklogs,
     post_worklog_to_jira,
     suggest_parent,
+    _migrate_old_configs,
+    _detect_issue_from_branch,
+    _sanitize_command,
+    _sanitize_session_commands,
+    _get_idle_threshold_seconds,
+    _get_dir_cluster,
+    _detect_context_switch,
+    _round_seconds,
+    _text_to_adf,
+    _handle_task_event,
+    _log_task_time,
+    _create_jira_issue,
 )
 
 
@@ -186,6 +201,45 @@ class TestSessionStart:
         assert session["workChunks"] == []
         assert session["pendingWorklogs"] == []
 
+    def test_initializes_active_tasks(self, tmp_path):
+        """New session should include empty activeTasks dict."""
+        self._setup_config(tmp_path)
+        cmd_session_start([str(tmp_path)])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert "activeTasks" in session
+        assert session["activeTasks"] == {}
+
+    def test_resumed_session_gets_active_tasks_if_missing(self, tmp_path):
+        """Resumed session from old format (no activeTasks) gets it back-filled."""
+        claude_dir = self._setup_config(tmp_path)
+        existing = {
+            "sessionId": "old-session",
+            "currentIssue": "TEST-5",
+            "activeIssues": {"TEST-5": {"startTime": 1000, "totalSeconds": 300}},
+            "activityBuffer": [],
+            "workChunks": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(existing))
+        cmd_session_start([str(tmp_path)])
+        session = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert "activeTasks" in session
+        assert session["activeTasks"] == {}
+
+    def test_resumed_session_gets_session_id_if_missing(self, tmp_path):
+        """Sessions created without sessionId (e.g. by /jira-start) get one on resume."""
+        claude_dir = self._setup_config(tmp_path)
+        existing = {
+            # No sessionId — simulates session created by /jira-start directly
+            "currentIssue": "TEST-5",
+            "activeIssues": {"TEST-5": {"startTime": 1000, "totalSeconds": 0}},
+            "activityBuffer": [],
+            "workChunks": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(existing))
+        cmd_session_start([str(tmp_path)])
+        session = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert session.get("sessionId"), "sessionId must be assigned on resume"
+
 
 # ── Task 1.3: log-activity ───────────────────────────────────────────────
 
@@ -225,7 +279,9 @@ class TestLogActivity:
 
     def test_skips_read_only_tools(self, tmp_path):
         _make_session_with_issue(tmp_path)
-        for tool in ["Read", "Glob", "Grep", "LS", "WebSearch"]:
+        for tool in ["Read", "Glob", "Grep", "LS", "WebSearch",
+                     "TaskList", "TaskGet", "ToolSearch", "Skill",
+                     "ListMcpResourcesTool", "BashOutput"]:
             tool_json = json.dumps({
                 "tool_name": tool,
                 "tool_input": {"file_path": "src/x.ts"},
@@ -782,3 +838,849 @@ class TestPostWorklogs:
              patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
             cmd_post_worklogs([str(tmp_path)])
         mock_post.assert_not_called()
+
+
+# ── Task-level time tracking ─────────────────────────────────────────────
+
+
+class TestTaskEventHandling:
+    def _setup(self, tmp_path, accuracy=5, issue_key="TEST-1"):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "enabled": True, "debugLog": False,
+            "accuracy": accuracy, "projectKey": "TEST",
+        }))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "test@example.com",
+            "apiToken": "test-token",
+            "baseUrl": "https://test.atlassian.net",
+        }))
+        session = {
+            "sessionId": "test",
+            "currentIssue": issue_key,
+            "activeIssues": {issue_key: {"startTime": 1000, "totalSeconds": 0}},
+            "accuracy": accuracy,
+            "activityBuffer": [],
+            "workChunks": [],
+            "activeTasks": {},
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        return claude_dir
+
+    def test_task_start_records_in_active_tasks(self, tmp_path):
+        """TaskUpdate → in_progress records task in activeTasks."""
+        self._setup(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "TaskUpdate",
+            "tool_input": {"taskId": "1", "status": "in_progress"},
+            "tool_response": {"taskId": "1", "subject": "Create TitleBadge", "status": "in_progress"},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert "1" in session["activeTasks"]
+        assert session["activeTasks"]["1"]["subject"] == "Create TitleBadge"
+        assert "startTime" in session["activeTasks"]["1"]
+
+    def test_task_complete_removes_from_active_tasks(self, tmp_path):
+        """TaskUpdate → completed removes task from activeTasks."""
+        self._setup(tmp_path)
+        # Seed activeTasks with a task that started 2 minutes ago
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activeTasks"]["1"] = {
+            "subject": "Create TitleBadge",
+            "startTime": int(time.time()) - 120,
+            "jiraKey": None,
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        complete_json = json.dumps({
+            "tool_name": "TaskUpdate",
+            "tool_input": {"taskId": "1", "status": "completed"},
+            "tool_response": {"taskId": "1", "subject": "Create TitleBadge", "status": "completed"},
+        })
+        with patch("jira_core.post_worklog_to_jira", return_value=True):
+            cmd_log_activity([str(tmp_path), complete_json])
+
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert "1" not in session.get("activeTasks", {})
+
+    def test_task_complete_low_accuracy_logs_to_parent_issue(self, tmp_path):
+        """accuracy < 8 → worklog posted to currentIssue with task subject as comment."""
+        self._setup(tmp_path, accuracy=5)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activeTasks"]["1"] = {
+            "subject": "Build payment feature",
+            "startTime": int(time.time()) - 120,
+            "jiraKey": None,
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        complete_json = json.dumps({
+            "tool_name": "TaskUpdate",
+            "tool_input": {"taskId": "1", "status": "completed"},
+            "tool_response": {"taskId": "1", "subject": "Build payment feature", "status": "completed"},
+        })
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), complete_json])
+
+        mock_post.assert_called_once()
+        args = mock_post.call_args[0]
+        assert args[3] == "TEST-1"  # posted to currentIssue
+        assert "Build payment feature" in args[5]  # subject in comment
+
+    def test_task_complete_high_accuracy_creates_subissue(self, tmp_path):
+        """accuracy >= 8 → creates sub-issue then logs worklog to it."""
+        self._setup(tmp_path, accuracy=8)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activeTasks"]["2"] = {
+            "subject": "Add OAuth integration",
+            "startTime": int(time.time()) - 300,
+            "jiraKey": None,
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        complete_json = json.dumps({
+            "tool_name": "TaskUpdate",
+            "tool_input": {"taskId": "2", "status": "completed"},
+            "tool_response": {"taskId": "2", "subject": "Add OAuth integration", "status": "completed"},
+        })
+        with patch("jira_core._create_jira_issue", return_value="TEST-99") as mock_create, \
+             patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), complete_json])
+
+        mock_create.assert_called_once()
+        create_args = mock_create.call_args[0]
+        assert create_args[3] == "TEST"           # project_key
+        assert create_args[4] == "Add OAuth integration"  # summary
+        assert create_args[5] == "TEST-1"         # parent_key
+
+        mock_post.assert_called_once()
+        post_args = mock_post.call_args[0]
+        assert post_args[3] == "TEST-99"          # logged to new sub-issue
+
+    def test_elapsed_less_than_60s_skips_logging(self, tmp_path):
+        """Micro-tasks (< 60s elapsed) produce no worklog."""
+        self._setup(tmp_path, accuracy=5)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activeTasks"]["3"] = {
+            "subject": "Tiny tweak",
+            "startTime": int(time.time()) - 10,  # only 10s ago
+            "jiraKey": None,
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        complete_json = json.dumps({
+            "tool_name": "TaskUpdate",
+            "tool_input": {"taskId": "3", "status": "completed"},
+            "tool_response": {"taskId": "3", "subject": "Tiny tweak", "status": "completed"},
+        })
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), complete_json])
+
+        mock_post.assert_not_called()
+
+
+# ── load_global_config ───────────────────────────────────────────────────
+
+
+class TestLoadGlobalConfig:
+    def test_returns_empty_when_missing(self, tmp_path, monkeypatch):
+        import jira_core
+        monkeypatch.setattr(jira_core, "GLOBAL_CONFIG_PATH", tmp_path / "nonexistent.json")
+        assert load_global_config() == {}
+
+    def test_reads_when_present(self, tmp_path, monkeypatch):
+        import jira_core
+        p = tmp_path / "global.json"
+        p.write_text(json.dumps({"email": "g@test.com"}))
+        monkeypatch.setattr(jira_core, "GLOBAL_CONFIG_PATH", p)
+        assert load_global_config()["email"] == "g@test.com"
+
+
+# ── debug_log rotation edge case ─────────────────────────────────────────
+
+
+class TestDebugLogRotationBackup:
+    def test_unlinks_existing_backup_before_rotate(self, tmp_path):
+        log_path = str(tmp_path / "test.log")
+        backup_path = tmp_path / "test.log.1"
+        backup_path.write_text("old backup")
+        with open(log_path, "w") as f:
+            f.write("x" * 1_100_000)
+        debug_log("rotate again", log_path=log_path)
+        assert backup_path.exists()
+        assert backup_path.stat().st_size > 1_000_000
+
+
+# ── _migrate_old_configs ─────────────────────────────────────────────────
+
+
+class TestMigrateOldConfigs:
+    def test_noop_when_no_claude_dir(self, tmp_path):
+        _migrate_old_configs(str(tmp_path))  # no exception
+
+    def test_noop_when_new_config_already_exists(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "jira-tracker.json").write_text(json.dumps({"old": True}))
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"new": True}))
+        _migrate_old_configs(str(tmp_path))
+        cfg = json.loads((claude_dir / CONFIG_NAME).read_text())
+        assert cfg == {"new": True}
+
+
+# ── _detect_issue_from_branch ────────────────────────────────────────────
+
+
+class TestDetectIssueFromBranch:
+    def _cfg(self, pattern="({key}-\\d+)", project_key="TEST"):
+        return {"branchPattern": pattern, "projectKey": project_key}
+
+    def test_extracts_key_from_branch(self, tmp_path):
+        cfg = self._cfg()
+        with patch("jira_core.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="fix/TEST-42-my-feature\n")
+            result = _detect_issue_from_branch(str(tmp_path), cfg)
+        assert result == "TEST-42"
+
+    def test_returns_none_when_no_match(self, tmp_path):
+        cfg = self._cfg()
+        with patch("jira_core.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="main\n")
+            result = _detect_issue_from_branch(str(tmp_path), cfg)
+        assert result is None
+
+    def test_returns_none_on_git_error(self, tmp_path):
+        import subprocess
+        cfg = self._cfg()
+        with patch("jira_core.subprocess.run", side_effect=subprocess.SubprocessError):
+            result = _detect_issue_from_branch(str(tmp_path), cfg)
+        assert result is None
+
+    def test_returns_none_when_empty_branch(self, tmp_path):
+        cfg = self._cfg()
+        with patch("jira_core.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="")
+            result = _detect_issue_from_branch(str(tmp_path), cfg)
+        assert result is None
+
+    def test_returns_none_without_pattern(self, tmp_path):
+        result = _detect_issue_from_branch(str(tmp_path), {"projectKey": "TEST"})
+        assert result is None
+
+    def test_returns_none_without_project_key(self, tmp_path):
+        result = _detect_issue_from_branch(str(tmp_path), {"branchPattern": "(.+)"})
+        assert result is None
+
+
+# ── cmd_session_start extra branches ─────────────────────────────────────
+
+
+class TestSessionStartExtra:
+    def _setup_config(self, tmp_path, extra=None):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        cfg = {"projectKey": "TEST", "enabled": True, "debugLog": False,
+               "accuracy": 5, "autonomyLevel": "C"}
+        if extra:
+            cfg.update(extra)
+        (claude_dir / CONFIG_NAME).write_text(json.dumps(cfg))
+        return claude_dir
+
+    def test_does_not_create_session_when_disabled(self, tmp_path):
+        self._setup_config(tmp_path, {"enabled": False})
+        cmd_session_start([str(tmp_path)])
+        assert not (tmp_path / ".claude" / SESSION_NAME).exists()
+
+    def test_detects_branch_issue_on_new_session(self, tmp_path):
+        self._setup_config(tmp_path, {
+            "branchPattern": "({key}-\\d+)",
+            "projectKey": "TEST",
+        })
+        with patch("jira_core._detect_issue_from_branch", return_value="TEST-99"):
+            cmd_session_start([str(tmp_path)])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["currentIssue"] == "TEST-99"
+        assert "TEST-99" in session["activeIssues"]
+
+
+# ── _sanitize_command + _sanitize_session_commands ───────────────────────
+
+
+class TestSanitize:
+    def test_sanitize_empty_string_returns_empty(self):
+        assert _sanitize_command("") == ""
+
+    def test_sanitize_none_returns_none(self):
+        assert _sanitize_command(None) is None
+
+    def test_sanitize_redacts_api_token(self):
+        cmd = 'curl -H "Authorization: Basic ATATT3xFfGF0test123456789012345678901234567890"'
+        result = _sanitize_command(cmd)
+        assert "ATATT" not in result
+
+    def test_sanitize_session_commands_workchunks(self):
+        session = {
+            "workChunks": [{"activities": [
+                {"tool": "Bash", "command": "curl -u user:ATATT3xFfGF0secret12345678901234567890abc"},
+            ]}],
+            "activityBuffer": [],
+        }
+        _sanitize_session_commands(session)
+        assert "ATATT" not in session["workChunks"][0]["activities"][0]["command"]
+
+    def test_sanitize_session_commands_activity_buffer(self):
+        session = {
+            "workChunks": [],
+            "activityBuffer": [
+                {"tool": "Bash", "command": 'printf "user:ATATT3xFfGF0secret12345" | base64'},
+            ],
+        }
+        _sanitize_session_commands(session)
+        assert "ATATT" not in session["activityBuffer"][0]["command"]
+
+    def test_sanitize_session_skips_no_command(self):
+        session = {
+            "workChunks": [{"activities": [{"tool": "Edit"}]}],
+            "activityBuffer": [{"tool": "Read"}],
+        }
+        _sanitize_session_commands(session)  # no exception
+
+
+# ── cmd_log_activity edge cases ──────────────────────────────────────────
+
+
+class TestLogActivityEdgeCases:
+    def test_returns_early_when_no_session(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"enabled": True}))
+        tool_json = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "a.ts"}})
+        cmd_log_activity([str(tmp_path), tool_json])  # no exception
+
+    def test_returns_early_on_invalid_json(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        cmd_log_activity([str(tmp_path), "not-valid-json"])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activityBuffer"] == []
+
+    def test_normalizes_non_dict_tool_response(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "a.ts"},
+            "tool_response": "some string response",
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert len(session["activityBuffer"]) == 1
+
+    def test_skips_claude_internal_file(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/repo/.claude/jira-session.json"},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activityBuffer"] == []
+
+
+# ── _create_jira_issue HTTP ───────────────────────────────────────────────
+
+
+class TestCreateJiraIssue:
+    def test_returns_issue_key_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = json.dumps({"key": "TEST-42"}).encode()
+        with patch("jira_core.urllib.request.urlopen", return_value=mock_resp):
+            key = _create_jira_issue(
+                "https://test.atlassian.net", "u@t.com", "token",
+                "TEST", "Do something", "TEST-1",
+            )
+        assert key == "TEST-42"
+
+    def test_returns_none_on_exception(self):
+        with patch("jira_core.urllib.request.urlopen", side_effect=Exception("network")):
+            key = _create_jira_issue(
+                "https://test.atlassian.net", "u@t.com", "token",
+                "TEST", "Do something", "TEST-1",
+            )
+        assert key is None
+
+
+# ── _log_task_time no-credentials path ───────────────────────────────────
+
+
+class TestLogTaskTimeNoCreds:
+    def test_returns_early_when_no_credentials(self, tmp_path):
+        session = {"currentIssue": "TEST-1", "accuracy": 5}
+        with patch("jira_core.get_cred", return_value=""), \
+             patch("jira_core.post_worklog_to_jira") as mock_post:
+            _log_task_time(str(tmp_path), session, {}, "Some task", 120)
+        mock_post.assert_not_called()
+
+
+# ── _handle_task_event edge cases ────────────────────────────────────────
+
+
+class TestHandleTaskEventEdgeCases:
+    def _session(self):
+        return {"currentIssue": "TEST-1", "accuracy": 5, "activeTasks": {}}
+
+    def test_skips_when_no_task_id(self):
+        session = self._session()
+        _handle_task_event(".", session, "TaskUpdate", {}, {}, {})
+        assert session["activeTasks"] == {}
+
+    def test_skips_when_no_status(self):
+        session = self._session()
+        _handle_task_event(
+            ".", session, "TaskUpdate",
+            {"taskId": "1"}, {"taskId": "1", "subject": "x"}, {},
+        )
+        assert session["activeTasks"] == {}
+
+    def test_does_not_double_start_task(self):
+        session = self._session()
+        old_start = int(time.time()) - 60
+        session["activeTasks"]["1"] = {"subject": "x", "startTime": old_start, "jiraKey": None}
+        _handle_task_event(
+            ".", session, "TaskUpdate",
+            {"taskId": "1", "status": "in_progress"},
+            {"taskId": "1", "subject": "x", "status": "in_progress"},
+            {},
+        )
+        assert session["activeTasks"]["1"]["startTime"] == old_start
+
+
+# ── _get_idle_threshold_seconds ──────────────────────────────────────────
+
+
+class TestIdleThreshold:
+    def test_high_accuracy(self):
+        result = _get_idle_threshold_seconds({"accuracy": 8, "idleThreshold": 15})
+        assert result == 5 * 60
+
+    def test_low_accuracy(self):
+        result = _get_idle_threshold_seconds({"accuracy": 3, "idleThreshold": 15})
+        assert result == 30 * 60
+
+    def test_default_accuracy(self):
+        result = _get_idle_threshold_seconds({"accuracy": 5, "idleThreshold": 15})
+        assert result == 15 * 60
+
+
+# ── _get_dir_cluster ─────────────────────────────────────────────────────
+
+
+class TestGetDirCluster:
+    def test_empty_path_returns_empty(self):
+        assert _get_dir_cluster("") == ""
+
+    def test_extracts_two_levels(self):
+        assert _get_dir_cluster("src/auth/token/helpers.ts") == "src/auth"
+
+    def test_top_level_file(self):
+        assert _get_dir_cluster("README.md") == ""
+
+
+# ── _detect_context_switch ───────────────────────────────────────────────
+
+
+class TestDetectContextSwitch:
+    def test_empty_prev_returns_false(self):
+        assert _detect_context_switch([], [{"file": "a.ts"}], 5) is False
+
+    def test_empty_curr_returns_false(self):
+        assert _detect_context_switch([{"file": "a.ts"}], [], 5) is False
+
+    def test_activities_with_no_files_returns_false(self):
+        prev = [{"tool": "Bash"}, {"tool": "Bash"}]
+        curr = [{"tool": "Bash"}, {"tool": "Bash"}]
+        assert _detect_context_switch(prev, curr, 5) is False
+
+    def test_high_accuracy_detects_any_cluster_change(self):
+        prev = [{"file": "src/auth/a.ts"}, {"file": "src/auth/b.ts"}]
+        curr = [{"file": "src/payments/x.ts"}, {"file": "src/payments/y.ts"}]
+        assert _detect_context_switch(prev, curr, 8) is True
+
+    def test_low_accuracy_needs_enough_activities(self):
+        prev = [{"file": "src/auth/a.ts"}]
+        curr = [{"file": "src/payments/x.ts"}]
+        assert _detect_context_switch(prev, curr, 2) is False
+
+    def test_low_accuracy_triggers_with_enough_activities(self):
+        prev = [{"file": "src/auth/a.ts"}] * 3
+        curr = [{"file": "src/payments/x.ts"}] * 3
+        assert _detect_context_switch(prev, curr, 2) is True
+
+
+# ── build_worklog edge cases ─────────────────────────────────────────────
+
+
+class TestBuildWorklogEdgeCases:
+    def test_subtracts_idle_gaps(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        session = {
+            "currentIssue": "TEST-1",
+            "activeIssues": {"TEST-1": {"startTime": 1000, "totalSeconds": 0}},
+            "workChunks": [{
+                "id": "c1", "issueKey": "TEST-1",
+                "startTime": 1000, "endTime": 2000,
+                "filesChanged": ["a.ts"],
+                "activities": [{"tool": "Edit", "type": "file_edit"}],
+                "idleGaps": [{"startTime": 1400, "endTime": 1600, "seconds": 200}],
+            }],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        result = build_worklog(str(tmp_path), "TEST-1")
+        assert result["seconds"] == 800
+
+    def test_more_than_five_files(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        files = [f"src/file{i}.ts" for i in range(7)]
+        session = {
+            "currentIssue": "TEST-1",
+            "activeIssues": {"TEST-1": {"startTime": 1000, "totalSeconds": 0}},
+            "workChunks": [{
+                "id": "c1", "issueKey": "TEST-1",
+                "startTime": 1000, "endTime": 2000,
+                "filesChanged": files,
+                "activities": [{"tool": "Edit"}],
+                "idleGaps": [],
+            }],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        result = build_worklog(str(tmp_path), "TEST-1")
+        assert "more files" in result["summary"]
+
+
+# ── _round_seconds ───────────────────────────────────────────────────────
+
+
+class TestRoundSeconds:
+    def test_zero_or_negative_returns_zero(self):
+        assert _round_seconds(0, 15, 5) == 0
+        assert _round_seconds(-10, 15, 5) == 0
+
+    def test_high_accuracy_uses_fine_rounding(self):
+        result = _round_seconds(61, 15, 9)
+        assert result == 120  # ceil(61/60)*60 = 2 min
+
+    def test_low_accuracy_uses_coarse_rounding(self):
+        result = _round_seconds(100, 15, 2)
+        assert result == 1800  # ceil(100/1800)*1800 = 30 min
+
+    def test_mid_accuracy_uses_base_rounding(self):
+        result = _round_seconds(100, 15, 5)
+        assert result == 900  # ceil(100/900)*900 = 15 min
+
+
+# ── cmd_session_end extra branches ───────────────────────────────────────
+
+
+class TestSessionEndExtra:
+    def test_returns_early_when_no_session(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        cmd_session_end([str(tmp_path)])  # no exception
+
+    def test_drains_activity_buffer_before_ending(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5, "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "buf-test", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {"TEST-1": {"startTime": now - 600, "totalSeconds": 0, "paused": False}},
+            "workChunks": [],
+            "activityBuffer": [
+                {"timestamp": now - 600, "tool": "Edit", "file": "a.ts",
+                 "type": "file_edit", "issueKey": "TEST-1"},
+                {"timestamp": now - 500, "tool": "Edit", "file": "b.ts",
+                 "type": "file_edit", "issueKey": "TEST-1"},
+            ],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["activityBuffer"] == []
+        assert len(updated.get("pendingWorklogs", [])) > 0
+
+    def test_fallback_to_wallclock_only_when_issue_has_activity(self, tmp_path):
+        """Wallclock fallback fires only when the issue has buffered activity."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5, "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "wc-test", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                "TEST-1": {"startTime": now - 1800, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [],
+            # Activity buffer has an entry for TEST-1 → wallclock fallback should fire
+            "activityBuffer": [
+                {"timestamp": now - 60, "tool": "Edit", "file": "a.ts",
+                 "type": "file_edit", "issueKey": "TEST-1"},
+            ],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert len(updated["pendingWorklogs"]) == 1
+        assert updated["pendingWorklogs"][0]["seconds"] > 0
+
+    def test_no_phantom_worklog_for_branch_issue_with_no_activity(self, tmp_path):
+        """Auto-detected branch issue with no activity must not generate a worklog.
+
+        Regression for the bug where wallclock fallback reported ~42 hours for
+        an issue auto-detected from branch name but never actually worked on.
+        """
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5, "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "phantom-test", "currentIssue": "BRANCH-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                # startTime set 42 hours ago, never worked on
+                "BRANCH-1": {"startTime": now - 153527, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [],
+            "activityBuffer": [],  # no activity at all
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["pendingWorklogs"] == []
+
+
+# ── _text_to_adf ─────────────────────────────────────────────────────────
+
+
+class TestTextToAdf:
+    def test_single_line(self):
+        result = _text_to_adf("Hello world")
+        assert result["version"] == 1
+        assert result["type"] == "doc"
+        assert result["content"][0]["content"][0]["text"] == "Hello world"
+
+    def test_multi_line_with_blank(self):
+        result = _text_to_adf("Line one\n\nLine two")
+        content = result["content"]
+        assert len(content) == 3
+        assert content[1]["content"] == []  # blank line → empty paragraph
+
+
+# ── post_worklog_to_jira HTTP paths ──────────────────────────────────────
+
+
+class TestPostWorklogToJiraHttp:
+    def test_returns_true_on_201(self):
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 201
+        with patch("jira_core.urllib.request.urlopen", return_value=mock_resp):
+            result = post_worklog_to_jira(
+                "https://t.atlassian.net", "u@t.com", "tok", "TEST-1", 900, "did stuff"
+            )
+        assert result is True
+
+    def test_returns_false_on_http_error(self):
+        err = urllib.error.HTTPError(
+            url="https://t.atlassian.net", code=400,
+            msg="Bad Request", hdrs=None, fp=None,
+        )
+        with patch("jira_core.urllib.request.urlopen", side_effect=err):
+            result = post_worklog_to_jira(
+                "https://t.atlassian.net", "u@t.com", "tok", "TEST-1", 900, "did stuff"
+            )
+        assert result is False
+
+    def test_returns_false_on_generic_exception(self):
+        with patch("jira_core.urllib.request.urlopen", side_effect=Exception("timeout")):
+            result = post_worklog_to_jira(
+                "https://t.atlassian.net", "u@t.com", "tok", "TEST-1", 900, "did stuff"
+            )
+        assert result is False
+
+
+# ── cmd_post_worklogs extra branches ─────────────────────────────────────
+
+
+class TestPostWorklogsExtra:
+    def _setup(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "t@t.com", "apiToken": "tok",
+            "baseUrl": "https://test.atlassian.net",
+        }))
+        return claude_dir
+
+    def test_returns_early_when_no_session(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        cmd_post_worklogs([str(tmp_path)])  # no exception
+
+    def test_skips_entry_with_zero_seconds(self, tmp_path):
+        claude_dir = self._setup(tmp_path)
+        session = {"pendingWorklogs": [
+            {"issueKey": "TEST-1", "seconds": 0, "summary": "x", "status": "approved"},
+        ]}
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        with patch("jira_core.post_worklog_to_jira") as mock_post:
+            cmd_post_worklogs([str(tmp_path)])
+        mock_post.assert_not_called()
+
+    def test_skips_entry_with_missing_issue_key(self, tmp_path):
+        claude_dir = self._setup(tmp_path)
+        session = {"pendingWorklogs": [
+            {"issueKey": "", "seconds": 900, "summary": "x", "status": "approved"},
+        ]}
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        with patch("jira_core.post_worklog_to_jira") as mock_post:
+            cmd_post_worklogs([str(tmp_path)])
+        mock_post.assert_not_called()
+
+
+# ── cmd_drain_buffer no-session guard ────────────────────────────────────
+
+
+class TestDrainBufferNoSession:
+    def test_returns_early_when_no_session(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        cmd_drain_buffer([str(tmp_path)])  # no exception, no session file
+
+
+# ── cmd_session_end: issue with zero startTime is skipped ────────────────
+
+
+class TestSessionEndZeroStartTime:
+    def test_skips_issue_with_zero_start_and_no_chunks(self, tmp_path):
+        """Active issue with startTime=0 and no chunks → no worklog entry."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5, "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        session = {
+            "sessionId": "zero-test", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {
+                "TEST-1": {"startTime": 0, "totalSeconds": 0, "paused": False},
+            },
+            "workChunks": [],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_session_end([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["pendingWorklogs"] == []
+
+
+# ── CLI wrapper functions ─────────────────────────────────────────────────
+
+
+class TestCliWrappers:
+    """Thin-wrapper CLI commands that delegate to core functions."""
+
+    def test_cmd_classify_issue(self, capsys):
+        import jira_core
+        with patch.object(sys, "argv", ["jira_core.py", "classify-issue", "Fix login bug"]):
+            jira_core.cmd_classify_issue(["Fix login bug"])
+        out = capsys.readouterr().out
+        result = json.loads(out)
+        assert result["type"] in ("Bug", "Task")
+
+    def test_cmd_build_worklog_no_issue_key(self, capsys):
+        import jira_core
+        jira_core.cmd_build_worklog([])
+        err = capsys.readouterr().err
+        assert "{}" in err
+
+    def test_cmd_build_worklog_with_issue_key(self, tmp_path, capsys):
+        import jira_core
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        session = {
+            "currentIssue": "TEST-1",
+            "activeIssues": {"TEST-1": {"startTime": 1000, "totalSeconds": 0}},
+            "workChunks": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        jira_core.cmd_build_worklog([str(tmp_path), "TEST-1"])
+        out = capsys.readouterr().out
+        result = json.loads(out)
+        assert result["issueKey"] == "TEST-1"
+
+    def test_cmd_suggest_parent(self, tmp_path, capsys):
+        import jira_core
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"projectKey": "TEST"}))
+        (claude_dir / SESSION_NAME).write_text(json.dumps({}))
+        jira_core.cmd_suggest_parent([str(tmp_path), "some task"])
+        out = capsys.readouterr().out
+        result = json.loads(out)
+        assert "sessionDefault" in result
+
+    def test_cmd_debug_log(self, tmp_path):
+        import jira_core
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": True}))
+        log_path = str(tmp_path / "debug.log")
+        with patch("jira_core.DEBUG_LOG_PATH", tmp_path / "debug.log"):
+            jira_core.cmd_debug_log([str(tmp_path), "hello from test"])
+
+    def test_main_unknown_command_exits(self):
+        import jira_core
+        with patch.object(sys, "argv", ["jira_core.py", "not-a-command"]), \
+             pytest.raises(SystemExit) as exc:
+            jira_core.main()
+        assert exc.value.code == 1
+
+    def test_main_no_args_exits(self):
+        import jira_core
+        with patch.object(sys, "argv", ["jira_core.py"]), \
+             pytest.raises(SystemExit) as exc:
+            jira_core.main()
+        assert exc.value.code == 1
+
+    def test_main_dispatches_known_command(self, tmp_path):
+        """main() calls fn(args) for a valid command (classify-issue path)."""
+        import jira_core
+        with patch.object(sys, "argv", ["jira_core.py", "classify-issue", "Fix bug"]), \
+             patch("jira_core.cmd_classify_issue") as mock_fn:
+            jira_core.main()
+        mock_fn.assert_called_once_with(["Fix bug"])
