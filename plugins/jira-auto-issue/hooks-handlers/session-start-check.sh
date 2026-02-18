@@ -19,12 +19,17 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 0
 fi
 
-# Check if enabled
+# Check if enabled (check project config + global fallback)
 if ! is_enabled "$ROOT"; then
   exit 0
 fi
 
 PROJECT_KEY=$(json_get "$CONFIG" "projectKey")
+# Ensure cloudId is available (fallback to global)
+CLOUD_ID=$(json_get "$CONFIG" "cloudId")
+if [[ -z "$CLOUD_ID" ]] && [[ -f "$GLOBAL_CONFIG" ]]; then
+  CLOUD_ID=$(json_get "$GLOBAL_CONFIG" "cloudId")
+fi
 
 # Migrate old current-task.json if present
 OLD_TASK=$(task_file "$ROOT")

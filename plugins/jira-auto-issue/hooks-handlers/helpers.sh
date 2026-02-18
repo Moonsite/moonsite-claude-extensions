@@ -128,6 +128,56 @@ with open(sys.argv[2], 'w') as f:
   echo "$sf"
 }
 
+# Global config path
+GLOBAL_CONFIG="$HOME/.claude/jira-tracker.global.json"
+
+# Load a credential field with fallback: project-local → global
+# Usage: load_cred_field <project_root> <field_name>
+load_cred_field() {
+  local root="$1" field="$2"
+  local local_config="$root/.claude/jira-tracker.local.json"
+  local val=""
+
+  # Try project-local first
+  if [[ -f "$local_config" ]]; then
+    val=$(json_get "$local_config" "$field")
+  fi
+
+  # Fallback to global
+  if [[ -z "$val" ]] && [[ -f "$GLOBAL_CONFIG" ]]; then
+    val=$(json_get "$GLOBAL_CONFIG" "$field")
+  fi
+
+  echo "$val"
+}
+
+# Detect project keys from git history (commits + branches)
+# Prints up to 3 most common keys, one per line, most frequent first
+detect_project_key_from_git() {
+  local root="${1:-.}"
+  {
+    git -C "$root" log --oneline -100 2>/dev/null
+    git -C "$root" branch -a 2>/dev/null
+  } | python3 -c "
+import sys, re
+from collections import Counter
+keys = re.findall(r'([A-Z][A-Z0-9]+-)\d+', sys.stdin.read())
+if keys:
+    for prefix, _ in Counter(keys).most_common(3):
+        print(prefix.rstrip('-'))
+"
+}
+
+# Entry point for calling functions from command line
+# Usage: bash helpers.sh <function_name> [args...]
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [[ $# -gt 0 ]]; then
+  func="$1"; shift
+  case "$func" in
+    detect_project_key) detect_project_key_from_git "$@" ;;
+    *) echo "Unknown function: $func" >&2; exit 1 ;;
+  esac
+fi
+
 # Migrate old current-task.json to new session format
 migrate_old_task() {
   local root="$1"
