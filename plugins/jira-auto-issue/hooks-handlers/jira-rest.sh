@@ -9,20 +9,21 @@ source "$SCRIPT_DIR/helpers.sh"
 
 jira_load_creds() {
   local root="$1"
-  local local_config="$root/.claude/jira-tracker.local.json"
   local config="$root/.claude/jira-tracker.json"
 
-  [[ ! -f "$local_config" ]] && { echo "ERROR: Missing $local_config — run /jira-setup" >&2; return 1; }
   [[ ! -f "$config" ]] && { echo "ERROR: Missing $config — run /jira-setup" >&2; return 1; }
 
-  JIRA_EMAIL=$(json_get "$local_config" "email")
-  JIRA_API_TOKEN=$(json_get "$local_config" "apiToken")
-  JIRA_BASE_URL=$(json_get "$local_config" "baseUrl")
-  JIRA_CLOUD_ID=$(json_get "$config" "cloudId")
+  # Use fallback chain: project-local → global
+  JIRA_EMAIL=$(load_cred_field "$root" "email")
+  JIRA_API_TOKEN=$(load_cred_field "$root" "apiToken")
+  JIRA_BASE_URL=$(load_cred_field "$root" "baseUrl")
+  JIRA_CLOUD_ID=$(load_cred_field "$root" "cloudId")
+  # Fall back to project config for cloudId
+  [[ -z "$JIRA_CLOUD_ID" ]] && JIRA_CLOUD_ID=$(json_get "$config" "cloudId")
   JIRA_PROJECT_KEY=$(json_get "$config" "projectKey")
 
   [[ -z "$JIRA_EMAIL" || -z "$JIRA_API_TOKEN" || -z "$JIRA_BASE_URL" ]] && {
-    echo "ERROR: Incomplete credentials in $local_config" >&2; return 1;
+    echo "ERROR: No credentials found. Set up project-local or global config — run /jira-setup" >&2; return 1;
   }
 }
 

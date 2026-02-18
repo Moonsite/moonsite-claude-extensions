@@ -128,6 +128,29 @@ with open(sys.argv[2], 'w') as f:
   echo "$sf"
 }
 
+# Global config path
+GLOBAL_CONFIG="$HOME/.claude/jira-tracker.global.json"
+
+# Load a credential field with fallback: project-local → global
+# Usage: load_cred_field <project_root> <field_name>
+load_cred_field() {
+  local root="$1" field="$2"
+  local local_config="$root/.claude/jira-tracker.local.json"
+  local val=""
+
+  # Try project-local first
+  if [[ -f "$local_config" ]]; then
+    val=$(json_get "$local_config" "$field")
+  fi
+
+  # Fallback to global
+  if [[ -z "$val" ]] && [[ -f "$GLOBAL_CONFIG" ]]; then
+    val=$(json_get "$GLOBAL_CONFIG" "$field")
+  fi
+
+  echo "$val"
+}
+
 # Migrate old current-task.json to new session format
 migrate_old_task() {
   local root="$1"
