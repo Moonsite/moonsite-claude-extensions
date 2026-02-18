@@ -17,6 +17,7 @@ from jira_core import (
     save_session,
     get_cred,
     cmd_session_start,
+    cmd_log_activity,
 )
 
 
@@ -175,3 +176,95 @@ class TestSessionStart:
         assert session["activityBuffer"] == []
         assert session["workChunks"] == []
         assert session["pendingWorklogs"] == []
+
+
+# ── Task 1.3: log-activity ───────────────────────────────────────────────
+
+
+def _make_session_with_issue(tmp_path, issue_key="TEST-1"):
+    """Helper: create config + session with an active issue."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    (claude_dir / CONFIG_NAME).write_text(json.dumps({
+        "enabled": True, "debugLog": False,
+    }))
+    session = {
+        "sessionId": "test",
+        "currentIssue": issue_key,
+        "activeIssues": {issue_key: {"startTime": 1000, "totalSeconds": 0}},
+        "activityBuffer": [],
+        "workChunks": [],
+    }
+    (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+    return claude_dir
+
+
+class TestLogActivity:
+    def test_stamps_current_issue(self, tmp_path):
+        _make_session_with_issue(tmp_path, "TEST-1")
+        tool_json = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/auth.ts"},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert len(session["activityBuffer"]) == 1
+        act = session["activityBuffer"][0]
+        assert act["issueKey"] == "TEST-1"
+        assert act["file"] == "src/auth.ts"
+        assert act["tool"] == "Edit"
+
+    def test_skips_read_only_tools(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        for tool in ["Read", "Glob", "Grep", "LS", "WebSearch"]:
+            tool_json = json.dumps({
+                "tool_name": tool,
+                "tool_input": {"file_path": "src/x.ts"},
+            })
+            cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert len(session["activityBuffer"]) == 0
+
+    def test_records_bash_command(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert len(session["activityBuffer"]) == 1
+        assert session["activityBuffer"][0]["command"] == "npm test"
+        assert session["activityBuffer"][0]["type"] == "bash"
+
+    def test_no_current_issue_still_logs(self, tmp_path):
+        """Activities without a current issue get issueKey=None."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "enabled": True, "debugLog": False,
+        }))
+        session = {
+            "sessionId": "test", "currentIssue": None,
+            "activeIssues": {}, "activityBuffer": [], "workChunks": [],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        tool_json = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "new.ts"},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert len(session["activityBuffer"]) == 1
+        assert session["activityBuffer"][0]["issueKey"] is None
+
+    def test_extracts_file_from_write(self, tmp_path):
+        _make_session_with_issue(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "src/new-file.ts", "content": "..."},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activityBuffer"][0]["file"] == "src/new-file.ts"
+        assert session["activityBuffer"][0]["type"] == "file_write"

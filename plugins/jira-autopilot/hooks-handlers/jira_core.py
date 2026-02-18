@@ -245,8 +245,65 @@ def cmd_session_start(args):
     )
 
 
+TOOL_TYPE_MAP = {
+    "Edit": "file_edit",
+    "Write": "file_write",
+    "MultiEdit": "file_edit",
+    "NotebookEdit": "file_edit",
+    "Bash": "bash",
+    "Task": "agent",
+}
+
+
+def cmd_log_activity(args):
+    root = args[0] if args else "."
+    tool_json_str = args[1] if len(args) > 1 else "{}"
+
+    session = load_session(root)
+    if not session:
+        return
+
+    try:
+        tool_data = json.loads(tool_json_str)
+    except json.JSONDecodeError:
+        return
+
+    tool_name = tool_data.get("tool_name", "")
+    tool_input = tool_data.get("tool_input", {})
+
+    # Skip read-only tools
+    if tool_name in READ_ONLY_TOOLS:
+        return
+
+    activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
+    file_path = tool_input.get("file_path", "")
+    command = tool_input.get("command", "")
+
+    activity = {
+        "timestamp": int(time.time()),
+        "tool": tool_name,
+        "type": activity_type,
+        "issueKey": session.get("currentIssue"),
+        "file": file_path,
+    }
+    if command:
+        activity["command"] = command
+
+    buffer = session.get("activityBuffer", [])
+    buffer.append(activity)
+    session["activityBuffer"] = buffer
+    save_session(root, session)
+
+    cfg = load_config(root)
+    debug_log(
+        f"tool={tool_name} file={file_path}",
+        category="log-activity",
+        enabled=cfg.get("debugLog", False),
+        issueKey=session.get("currentIssue", ""),
+    )
+
+
 # Stubs — implemented in subsequent tasks
-def cmd_log_activity(args): pass
 def cmd_drain_buffer(args): pass
 def cmd_session_end(args): pass
 def cmd_classify_issue(args): pass
