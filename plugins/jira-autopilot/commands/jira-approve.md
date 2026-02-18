@@ -6,14 +6,15 @@ allowed-tools: Bash, Write, Read, ToolSearch, mcp__atlassian__createJiraIssue, m
 
 # Approve Pending Work Items
 
-Review unattributed work chunks and create or link Jira issues for them.
+Review unattributed work chunks and deferred worklogs, then create or link Jira issues for them.
 
 ## Steps
 
 1. **Read** `<project-root>/.claude/jira-session.json`
-   - If no `pendingIssues` with status `awaiting_approval`, tell user "No pending work items to review."
+   - Check for `pendingIssues` with status `awaiting_approval` AND `pendingWorklogs` with status `deferred`.
+   - If neither exists, tell user "No pending work items to review."
 
-2. **For each pending item**, show:
+2. **For each pending issue**, show:
    ```
    Pending Work #<n>
    Suggested summary: <suggestedSummary>
@@ -46,6 +47,15 @@ Review unattributed work chunks and create or link Jira issues for them.
 6. **On Skip**:
    - Update pending item status to `skipped`
 
-7. **Update** `jira-session.json` with all changes.
+7. **For each deferred worklog** (from /jira-stop reject → keep for later):
+   ```
+   Deferred Worklog #<n>
+   Issue: <issueKey>
+   Time: <rounded time>
+   Summary: "<summary>"
+   ```
+   Ask: Approve (post now) / Edit / Redirect to different issue / Drop
 
-8. **Show summary** of actions taken.
+8. **Update** `jira-session.json` with all changes.
+
+9. **Show summary** of actions taken.

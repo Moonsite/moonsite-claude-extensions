@@ -13,16 +13,23 @@ Show the current session tracking status across all active issues.
 1. **Read** `<project-root>/.claude/jira-session.json`
    - If it doesn't exist, say "No active session. Use /jira-start to begin tracking."
 
-2. **For each issue in `activeIssues`**, calculate elapsed time:
+2. **Read config** from `<project-root>/.claude/jira-autopilot.json`.
+
+3. **For each issue in `activeIssues`**, calculate elapsed time:
    - `totalSeconds + (now - startTime)` if not paused
    - `totalSeconds` if paused
 
-3. **Count work chunks and activities** per issue from `workChunks` array.
+4. **Count work chunks and activities** per issue from `workChunks` array.
 
-4. **Display**:
+5. **Display**:
    ```
-   Jira Session Status
+   Jira Autopilot Status
    ════════════════════════════════════════
+
+   Project: <projectKey>
+   Autonomy: <level> (<description>)
+   Accuracy: <value>/10 (rounding: <timeRounding>m, idle: <idleThreshold>m)
+   Debug log: <enabled|disabled>
 
    Current issue: <currentIssue or "none">
 
@@ -37,13 +44,17 @@ Show the current session tracking status across all active issues.
    │  └─ Elapsed: <X>h <Y>m
    └─ Total tracked: <total time>
 
+   Pending worklogs: <N> (use /jira-stop or /jira-approve to review)
    Pending (unlinked): <N> work chunks
    Activity buffer: <N> items
    ```
 
-5. **Read config** from `<project-root>/.claude/jira-autopilot.json` and show project key + time rounding setting.
+6. **Autonomy level descriptions** for the display:
+   - C: "Cautious — asks before every action"
+   - B: "Balanced — shows summaries, auto-proceeds"
+   - A: "Autonomous — acts silently"
 
-6. **Show tips**:
+7. **Show tips**:
    - `/jira-start <KEY>` to switch to a different issue
    - `/jira-stop` to log time and stop tracking
    - `/jira-approve` to review pending work

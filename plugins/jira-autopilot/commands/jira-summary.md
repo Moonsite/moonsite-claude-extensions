@@ -19,6 +19,7 @@ Aggregate today's session data and display a formatted summary.
    - Files changed per issue
    - Total activities per issue
    - Pending/unattributed work chunks
+   - Deferred worklogs
 
 4. **Display formatted table**:
    ```
