@@ -286,6 +286,7 @@ def _sanitize_command(command: str) -> str:
     return command
 
 
+
 def _sanitize_session_commands(session: dict):
     """Retroactively sanitize commands in workChunks and activityBuffer."""
     for chunk in session.get("workChunks", []):
