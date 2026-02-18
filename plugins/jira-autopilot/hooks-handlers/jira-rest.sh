@@ -2,8 +2,21 @@
 # REST API client for Jira Cloud — fallback when MCP tools are unavailable
 # Uses curl + Basic auth (email:apiToken)
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/helpers.sh"
+# Resolve script directory — works when sourced from bash or executed directly
+if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "$0" ]]; then
+  _JIRA_REST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif [[ -n "${0:-}" && -f "$0" ]]; then
+  _JIRA_REST_DIR="$(cd "$(dirname "$0")" && pwd)"
+else
+  # Fallback: look relative to this file's known location
+  _JIRA_REST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+fi
+# Guard: verify helpers.sh exists at resolved path
+if [[ -f "$_JIRA_REST_DIR/helpers.sh" ]]; then
+  source "$_JIRA_REST_DIR/helpers.sh"
+else
+  echo "WARNING: helpers.sh not found at $_JIRA_REST_DIR" >&2
+fi
 
 # ── Credentials ──────────────────────────────────────────────────────────────
 

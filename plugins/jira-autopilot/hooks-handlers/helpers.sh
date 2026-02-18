@@ -78,11 +78,9 @@ with open(f, 'w') as fh: json.dump(data, fh, indent=2)
 }
 
 # Check if tracker is enabled (config exists, enabled=true, no local override)
+# NOTE: Migration is handled by session-start only, not on every hook call
 is_enabled() {
   local root="$1"
-
-  # Auto-migrate old jira-tracker config files if present
-  _migrate_config_names "$root"
 
   local config="$root/.claude/jira-autopilot.json"
   local local_config="$root/.claude/jira-autopilot.local.json"

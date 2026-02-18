@@ -90,7 +90,9 @@ def debug_log(message: str, category: str = "general", enabled: bool = True,
               log_path: str = None, **kwargs):
     if not enabled:
         return
-    path = Path(log_path) if log_path else DEBUG_LOG_PATH
+    # Allow override via env var (used by tests to avoid writing to global log)
+    env_path = os.environ.get("JIRA_AUTOPILOT_DEBUG_LOG")
+    path = Path(log_path) if log_path else (Path(env_path) if env_path else DEBUG_LOG_PATH)
     # Rotate if too large
     if path.exists() and path.stat().st_size > MAX_LOG_SIZE:
         backup = path.with_suffix(".log.1")
@@ -254,6 +256,29 @@ TOOL_TYPE_MAP = {
     "Task": "agent",
 }
 
+# Patterns to redact from logged bash commands
+_SENSITIVE_PATTERNS = [
+    # API tokens (Atlassian format: ATATT3x...)
+    (re.compile(r'ATATT[A-Za-z0-9+/=_-]{20,}'), '[REDACTED_TOKEN]'),
+    # Generic Bearer/Basic auth headers
+    (re.compile(r'(Authorization:\s*(?:Basic|Bearer)\s+)\S+'), r'\1[REDACTED]'),
+    # -u user:token patterns
+    (re.compile(r'(-u\s+\S+:)\S+'), r'\1[REDACTED]'),
+    # printf of email:token for base64
+    (re.compile(r'(printf\s+["\'])[^"\']*[:@][^"\']*(["\'])'), r'\1[REDACTED]\2'),
+    # apiToken values in JSON
+    (re.compile(r'("apiToken"\s*:\s*")[^"]+(")', re.IGNORECASE), r'\1[REDACTED]\2'),
+]
+
+
+def _sanitize_command(command: str) -> str:
+    """Remove credentials, tokens, and secrets from bash command strings."""
+    if not command:
+        return command
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        command = pattern.sub(replacement, command)
+    return command
+
 
 def cmd_log_activity(args):
     root = args[0] if args else "."
@@ -287,7 +312,7 @@ def cmd_log_activity(args):
         "file": file_path,
     }
     if command:
-        activity["command"] = command
+        activity["command"] = _sanitize_command(command)
 
     buffer = session.get("activityBuffer", [])
     buffer.append(activity)
@@ -535,7 +560,7 @@ def build_worklog(root: str, issue_key: str) -> dict:
         for act in chunk.get("activities", []):
             total_activities += 1
             if act.get("command"):
-                all_commands.append(act["command"])
+                all_commands.append(_sanitize_command(act["command"]))
 
         start = chunk.get("startTime", 0)
         end = chunk.get("endTime", 0)
