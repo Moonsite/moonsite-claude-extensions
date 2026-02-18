@@ -31,3 +31,4 @@ echo "$COMMAND" | grep -q "$CURRENT" && exit 0
 
 # Suggest including issue key
 echo "[jira-autopilot] Active issue: $CURRENT. Consider including in commit message: $CURRENT: <message>"
+echo "[jira-autopilot] Context-switch reminder: If the conversation has shifted to a different topic or feature area since $CURRENT was started, consider using /jira-start to track the new work separately."

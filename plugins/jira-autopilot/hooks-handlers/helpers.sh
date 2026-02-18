@@ -14,6 +14,32 @@ find_project_root() {
   return 1
 }
 
+# Backward compatibility: migrate old jira-tracker config files to jira-autopilot
+# Runs on source — auto-renames if old files exist and new ones don't
+_migrate_config_names() {
+  local root="$1"
+  [[ -z "$root" ]] && return 0
+  local claude_dir="$root/.claude"
+  [[ ! -d "$claude_dir" ]] && return 0
+
+  # Migrate project config
+  if [[ -f "$claude_dir/jira-tracker.json" && ! -f "$claude_dir/jira-autopilot.json" ]]; then
+    mv "$claude_dir/jira-tracker.json" "$claude_dir/jira-autopilot.json"
+  fi
+
+  # Migrate local credentials
+  if [[ -f "$claude_dir/jira-tracker.local.json" && ! -f "$claude_dir/jira-autopilot.local.json" ]]; then
+    mv "$claude_dir/jira-tracker.local.json" "$claude_dir/jira-autopilot.local.json"
+  fi
+
+  # Migrate global config
+  local global_old="$HOME/.claude/jira-tracker.global.json"
+  local global_new="$HOME/.claude/jira-autopilot.global.json"
+  if [[ -f "$global_old" && ! -f "$global_new" ]]; then
+    mv "$global_old" "$global_new"
+  fi
+}
+
 # Read a JSON value using python (available on macOS)
 json_get() {
   local file="$1" key="$2"
@@ -54,6 +80,10 @@ with open(f, 'w') as fh: json.dump(data, fh, indent=2)
 # Check if tracker is enabled (config exists, enabled=true, no local override)
 is_enabled() {
   local root="$1"
+
+  # Auto-migrate old jira-tracker config files if present
+  _migrate_config_names "$root"
+
   local config="$root/.claude/jira-autopilot.json"
   local local_config="$root/.claude/jira-autopilot.local.json"
 
