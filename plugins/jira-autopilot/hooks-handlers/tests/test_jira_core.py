@@ -19,6 +19,7 @@ from jira_core import (
     cmd_session_start,
     cmd_log_activity,
     cmd_drain_buffer,
+    classify_issue,
 )
 
 
@@ -395,3 +396,48 @@ class TestDrainBuffer:
         cmd_drain_buffer([str(tmp_path)])
         updated = json.loads((claude_dir / SESSION_NAME).read_text())
         assert updated["workChunks"] == []
+
+
+# ── Task 1.5: classify-issue ─────────────────────────────────────────────
+
+
+class TestClassifyIssue:
+    def test_classify_bug_from_fix(self):
+        result = classify_issue("Fix login redirect crash")
+        assert result["type"] == "Bug"
+        assert result["confidence"] > 0.5
+
+    def test_classify_bug_from_multiple_signals(self):
+        result = classify_issue("Fix broken error handling regression")
+        assert result["type"] == "Bug"
+        assert result["confidence"] > 0.7
+
+    def test_classify_task(self):
+        result = classify_issue("Add payment processing module")
+        assert result["type"] == "Task"
+
+    def test_classify_task_from_create(self):
+        result = classify_issue("Create user registration page")
+        assert result["type"] == "Task"
+
+    def test_classify_ambiguous_defaults_to_task(self):
+        result = classify_issue("Update dependencies")
+        assert result["type"] == "Task"
+
+    def test_context_no_new_files_boosts_bug(self):
+        result = classify_issue("Fix auth flow", context={
+            "new_files_created": 0, "files_edited": 3,
+        })
+        assert result["type"] == "Bug"
+        assert result["confidence"] > 0.6
+
+    def test_context_new_files_boosts_task(self):
+        result = classify_issue("Setup new module", context={
+            "new_files_created": 2, "files_edited": 0,
+        })
+        assert result["type"] == "Task"
+
+    def test_returns_signals(self):
+        result = classify_issue("Fix login crash")
+        assert "fix" in result["signals"]
+        assert "crash" in result["signals"]

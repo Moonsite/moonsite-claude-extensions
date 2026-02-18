@@ -481,9 +481,44 @@ def cmd_drain_buffer(args):
                   f"Files: {files} → unattributed (issueKey={c['issueKey']})")
 
 
+def classify_issue(summary: str, context: dict = None) -> dict:
+    """Classify issue as Bug or Task from summary text and optional context."""
+    lower = summary.lower()
+    bug_score = sum(1 for s in BUG_SIGNALS if s in lower)
+    task_score = sum(1 for s in TASK_SIGNALS if s in lower)
+
+    if context:
+        if context.get("new_files_created", 0) == 0 and context.get("files_edited", 0) > 0:
+            bug_score += 1
+        if context.get("new_files_created", 0) > 0:
+            task_score += 1
+
+    if bug_score >= 2 or (bug_score > task_score and bug_score >= 1):
+        confidence = min(0.5 + bug_score * 0.15, 0.95)
+        return {
+            "type": "Bug",
+            "confidence": confidence,
+            "signals": [s for s in BUG_SIGNALS if s in lower],
+        }
+
+    confidence = min(0.5 + task_score * 0.15, 0.95)
+    return {
+        "type": "Task",
+        "confidence": confidence,
+        "signals": [s for s in TASK_SIGNALS if s in lower],
+    }
+
+
+def cmd_classify_issue(args):
+    summary = args[0] if args else ""
+    context_json = args[1] if len(args) > 1 else None
+    context = json.loads(context_json) if context_json else None
+    result = classify_issue(summary, context)
+    print(json.dumps(result))
+
+
 # Stubs — implemented in subsequent tasks
 def cmd_session_end(args): pass
-def cmd_classify_issue(args): pass
 def cmd_suggest_parent(args): pass
 def cmd_build_worklog(args): pass
 
