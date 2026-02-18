@@ -8,3 +8,5 @@ source "$SCRIPT_DIR/helpers.sh"
 
 ROOT=$(find_project_root) || exit 0
 python3 "$SCRIPT_DIR/jira_core.py" session-end "$ROOT"
+# Post approved worklogs to Jira (autonomy B/A only — C requires /jira-stop approval)
+python3 "$SCRIPT_DIR/jira_core.py" post-worklogs "$ROOT"

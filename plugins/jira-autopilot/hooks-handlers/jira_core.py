@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """jira-autopilot core module — all business logic for hooks and commands."""
 
+import base64
 import json
 import os
 import re
@@ -8,6 +9,8 @@ import sys
 import time
 import math
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime
 from collections import Counter
@@ -122,6 +125,7 @@ def main():
         "log-activity": cmd_log_activity,
         "drain-buffer": cmd_drain_buffer,
         "session-end": cmd_session_end,
+        "post-worklogs": cmd_post_worklogs,
         "classify-issue": cmd_classify_issue,
         "suggest-parent": cmd_suggest_parent,
         "build-worklog": cmd_build_worklog,
@@ -196,9 +200,11 @@ def cmd_session_start(args):
     existing = load_session(root)
     # If there's already an active session with issues, preserve it
     if existing.get("activeIssues"):
-        # Update autonomy/accuracy from config in case it changed
+        # Always sync autonomy/accuracy from config (may have changed via /jira-setup)
         existing["autonomyLevel"] = cfg.get("autonomyLevel", "C")
         existing["accuracy"] = cfg.get("accuracy", 5)
+        # Sanitize any credentials that may have been logged before the fix
+        _sanitize_session_commands(existing)
         save_session(root, existing)
         debug_log(
             "Resuming existing session",
@@ -280,6 +286,18 @@ def _sanitize_command(command: str) -> str:
     return command
 
 
+
+def _sanitize_session_commands(session: dict):
+    """Retroactively sanitize commands in workChunks and activityBuffer."""
+    for chunk in session.get("workChunks", []):
+        for activity in chunk.get("activities", []):
+            if activity.get("command"):
+                activity["command"] = _sanitize_command(activity["command"])
+    for activity in session.get("activityBuffer", []):
+        if activity.get("command"):
+            activity["command"] = _sanitize_command(activity["command"])
+
+
 def cmd_log_activity(args):
     root = args[0] if args else "."
     tool_json_str = args[1] if len(args) > 1 else "{}"
@@ -303,6 +321,11 @@ def cmd_log_activity(args):
     activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
     file_path = tool_input.get("file_path", "")
     command = tool_input.get("command", "")
+
+    # Skip writes to internal plugin state/config files — these are noise,
+    # not user work, and may contain sensitive paths or credential data
+    if file_path and "/.claude/" in file_path:
+        return
 
     activity = {
         "timestamp": int(time.time()),
@@ -692,6 +715,86 @@ def cmd_session_end(args):
         category="session-end",
         enabled=debug,
     )
+
+
+def _text_to_adf(text: str) -> dict:
+    """Convert plain text to Atlassian Document Format."""
+    paragraphs = []
+    for line in text.split("\n"):
+        if line.strip():
+            paragraphs.append(
+                {"type": "paragraph", "content": [{"type": "text", "text": line}]}
+            )
+        else:
+            paragraphs.append({"type": "paragraph", "content": []})
+    return {"version": 1, "type": "doc", "content": paragraphs}
+
+
+def post_worklog_to_jira(base_url: str, email: str, api_token: str,
+                          issue_key: str, seconds: int, comment: str) -> bool:
+    """POST a worklog entry to Jira Cloud REST API. Returns True on success."""
+    url = f"{base_url.rstrip('/')}/rest/api/3/issue/{issue_key}/worklog"
+    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+    payload = json.dumps({
+        "timeSpentSeconds": seconds,
+        "comment": _text_to_adf(comment),
+    }).encode()
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Authorization", f"Basic {auth}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        return False
+    except Exception:
+        return False
+
+
+def cmd_post_worklogs(args):
+    """Post all 'approved' pendingWorklogs to Jira, then mark them 'posted'."""
+    root = args[0] if args else "."
+    cfg = load_config(root)
+    session = load_session(root)
+    if not session:
+        return
+
+    debug = cfg.get("debugLog", False)
+
+    base_url = get_cred(root, "baseUrl")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+
+    if not (base_url and email and api_token):
+        debug_log("No credentials — skipping worklog posting", category="post-worklogs", enabled=debug)
+        return
+
+    pending = session.get("pendingWorklogs", [])
+    posted_any = False
+
+    for entry in pending:
+        if entry.get("status") != "approved":
+            continue
+        issue_key = entry.get("issueKey", "")
+        seconds = entry.get("seconds", 0)
+        summary = entry.get("summary", "")
+        if not issue_key or seconds <= 0:
+            continue
+
+        ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, summary)
+        entry["status"] = "posted" if ok else "failed"
+        posted_any = True
+        debug_log(
+            f"issue={issue_key} seconds={seconds} status={entry['status']}",
+            category="post-worklogs",
+            enabled=debug,
+        )
+        if ok:
+            print(f"[jira-autopilot] Logged {seconds//60}m to {issue_key}", flush=True)
+
+    if posted_any:
+        save_session(root, session)
 
 
 def suggest_parent(root: str, summary: str) -> dict:

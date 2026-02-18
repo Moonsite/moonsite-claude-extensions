@@ -6,6 +6,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from unittest.mock import patch, MagicMock
+
 from jira_core import (
     CONFIG_NAME,
     LOCAL_CONFIG_NAME,
@@ -22,6 +24,8 @@ from jira_core import (
     classify_issue,
     build_worklog,
     cmd_session_end,
+    cmd_post_worklogs,
+    post_worklog_to_jira,
     suggest_parent,
 )
 
@@ -701,3 +705,80 @@ class TestSuggestParent:
         assert result["sessionDefault"] is None
         assert result["recent"] == []
         assert result["contextual"] == []
+
+
+# ── Task 1.9: post-worklogs ──────────────────────────────────────────────
+
+
+class TestPostWorklogs:
+    def _setup(self, tmp_path, autonomy="A"):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "autonomyLevel": autonomy,
+        }))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "test@example.com",
+            "apiToken": "test-token",
+            "baseUrl": "https://test.atlassian.net",
+        }))
+        return claude_dir
+
+    def test_posts_approved_entries(self, tmp_path):
+        claude_dir = self._setup(tmp_path)
+        session = {
+            "pendingWorklogs": [
+                {"issueKey": "TEST-1", "seconds": 900, "summary": "Fixed bug", "status": "approved"},
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_post_worklogs([str(tmp_path)])
+        mock_post.assert_called_once_with(
+            "https://test.atlassian.net", "test@example.com", "test-token",
+            "TEST-1", 900, "Fixed bug",
+        )
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["pendingWorklogs"][0]["status"] == "posted"
+
+    def test_skips_pending_and_deferred(self, tmp_path):
+        claude_dir = self._setup(tmp_path)
+        session = {
+            "pendingWorklogs": [
+                {"issueKey": "TEST-1", "seconds": 900, "summary": "a", "status": "pending"},
+                {"issueKey": "TEST-2", "seconds": 900, "summary": "b", "status": "deferred"},
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_post_worklogs([str(tmp_path)])
+        mock_post.assert_not_called()
+
+    def test_marks_failed_on_api_error(self, tmp_path):
+        claude_dir = self._setup(tmp_path)
+        session = {
+            "pendingWorklogs": [
+                {"issueKey": "TEST-1", "seconds": 900, "summary": "x", "status": "approved"},
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        with patch("jira_core.post_worklog_to_jira", return_value=False):
+            cmd_post_worklogs([str(tmp_path)])
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["pendingWorklogs"][0]["status"] == "failed"
+
+    def test_noop_without_credentials(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"debugLog": False}))
+        session = {
+            "pendingWorklogs": [
+                {"issueKey": "TEST-1", "seconds": 900, "summary": "x", "status": "approved"},
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        # Patch global config to return empty so no fallback credentials exist
+        with patch("jira_core.load_global_config", return_value={}), \
+             patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_post_worklogs([str(tmp_path)])
+        mock_post.assert_not_called()
