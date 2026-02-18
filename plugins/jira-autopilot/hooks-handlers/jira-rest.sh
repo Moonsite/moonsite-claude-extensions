@@ -130,6 +130,89 @@ jira_add_comment() {
   _jira_parse "$response"
 }
 
+# ── New API Functions (Phase 4) ─────────────────────────────────────────────
+
+# Search for open Epics/Stories matching keywords from a summary
+# Usage: jira_search_parents "fix stripe webhook timeout"
+jira_search_parents() {
+  local keywords="$1"
+  local encoded_jql
+  encoded_jql=$(python3 -c "
+import urllib.parse, sys
+keywords = sys.argv[1]
+jql = f'project={\"$JIRA_PROJECT_KEY\"} AND issuetype in (Epic,Story) AND status != Done AND text ~ \"{keywords}\" ORDER BY updated DESC'
+print(urllib.parse.quote(jql))
+" "$keywords")
+  local response
+  response=$(_jira_curl GET "/search?jql=${encoded_jql}&maxResults=5&fields=summary,issuetype,status")
+  _jira_parse "$response"
+}
+
+# Create a link between two issues
+# Usage: jira_link_issues "PROJ-1" "PROJ-2" "Relates"
+jira_link_issues() {
+  local inward_key="$1" outward_key="$2" link_type="${3:-Relates}"
+  local payload
+  payload=$(python3 -c "
+import json, sys
+data = {
+    'type': {'name': sys.argv[3]},
+    'inwardIssue': {'key': sys.argv[1]},
+    'outwardIssue': {'key': sys.argv[2]}
+}
+print(json.dumps(data))
+" "$inward_key" "$outward_key" "$link_type")
+  local response
+  response=$(_jira_curl POST "/issueLink" "$payload")
+  _jira_parse "$response"
+}
+
+# Log time with a descriptive comment in ADF format
+# Usage: jira_log_time_with_comment "PROJ-1" 900 "Refactored auth middleware"
+jira_log_time_with_comment() {
+  local issue_key="$1" seconds="$2" comment="$3"
+  local adf_comment
+  adf_comment=$(text_to_adf "$comment")
+  local payload
+  payload=$(python3 -c "
+import json, sys
+data = {
+    'timeSpentSeconds': int(sys.argv[1]),
+    'comment': json.loads(sys.argv[2])
+}
+print(json.dumps(data))
+" "$seconds" "$adf_comment")
+  local response
+  response=$(_jira_curl POST "/issue/${issue_key}/worklog" "$payload")
+  _jira_parse "$response"
+}
+
+# Get unreleased versions for the project
+# Usage: jira_get_versions
+jira_get_versions() {
+  local response
+  response=$(_jira_curl GET "/project/${JIRA_PROJECT_KEY}/versions")
+  local body
+  body=$(_jira_parse "$response") || return 1
+  # Filter to unreleased only
+  echo "$body" | python3 -c "
+import json, sys
+versions = json.load(sys.stdin)
+unreleased = [v for v in versions if not v.get('released', False)]
+print(json.dumps(unreleased))
+" 2>/dev/null
+}
+
+# Get current user info including accountId
+# Usage: jira_get_myself
+jira_get_myself() {
+  local response
+  response=$(_jira_curl GET "/myself")
+  _jira_parse "$response"
+}
+
+# ── Cloud ID ────────────────────────────────────────────────────────────────
+
 jira_get_cloud_id() {
   local base_url="$1"
   local response
