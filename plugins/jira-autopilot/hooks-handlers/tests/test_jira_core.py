@@ -280,7 +280,7 @@ class TestLogActivity:
     def test_skips_read_only_tools(self, tmp_path):
         _make_session_with_issue(tmp_path)
         for tool in ["Read", "Glob", "Grep", "LS", "WebSearch",
-                     "TaskList", "TaskGet", "ToolSearch", "Skill",
+                     "TaskList", "TaskGet", "ToolSearch", "Skill", "Task",
                      "ListMcpResourcesTool", "BashOutput"]:
             tool_json = json.dumps({
                 "tool_name": tool,

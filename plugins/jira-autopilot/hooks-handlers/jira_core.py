@@ -27,7 +27,7 @@ MAX_LOG_SIZE = 1_000_000  # 1MB
 READ_ONLY_TOOLS = frozenset([
     "Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
     "TodoRead", "NotebookRead", "AskUserQuestion",
-    "TaskList", "TaskGet", "ToolSearch", "Skill",
+    "TaskList", "TaskGet", "ToolSearch", "Skill", "Task",
     "ListMcpResourcesTool", "BashOutput",
 ])
 
