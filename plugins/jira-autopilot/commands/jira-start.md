@@ -72,7 +72,14 @@ python3 <plugin-root>/hooks-handlers/jira_core.py suggest-parent "<project-root>
 ```
 This returns JSON with `sessionDefault`, `contextual`, and `recent` arrays.
 
-**Autonomy C**: Present the full selection list:
+**Autonomy C**: Present the parent selection. Always include "Create new parent" and "No parent" options, even when there are no suggestions:
+- If there are contextual or recent suggestions, show them as numbered options followed by "Enter a key/URL", "Create new parent", and "No parent".
+- If there are NO suggestions (empty results), show just three options:
+  1. Enter a parent key
+  2. Create new parent (create an Epic first, then link)
+  3. No parent (standalone task)
+
+Example with suggestions:
 ```
 Parent for "<summary>":
   Suggested (by context):
