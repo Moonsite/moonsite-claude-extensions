@@ -1,6 +1,6 @@
 {
   "name": "jira-autopilot",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
   "author": {
     "name": "Boris Sigalov"
