@@ -1,7 +1,7 @@
 #!/bin/bash
-# UserPromptSubmit hook: gate implementation work behind Jira ticket + branch discipline
-# If the user's prompt signals a new feature/fix and no issue is active, remind Claude
-# to create a Jira ticket and feature branch before writing any code.
+# UserPromptSubmit hook: intercept implementation work and time-logging shortcuts
+# - If the user signals a new feature/fix with no active issue → require /jira-start first
+# - If the user signals time logging intent → require /jira-stop instead of raw MCP
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -18,12 +18,43 @@ INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('user_prompt',''))" 2>/dev/null || true)
 [[ -z "$PROMPT" ]] && exit 0
 
-# If an issue is already active, nothing to enforce
 CURRENT=$(json_get "$SESSION_FILE" "currentIssue")
-[[ -n "$CURRENT" && "$CURRENT" != "None" ]] && exit 0
-
-# Detect task/fix intent — look for implementation keywords
 PROMPT_LOWER=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]')
+
+# ── Time-logging intent (fires regardless of whether an issue is active) ──────
+# Matches: "1h", "30m", "2h30m", "log time", "log 1 hour", "45 minutes", etc.
+TIME_SIGNALS="log time\|log.*hour\|log.*minute\|worklog\|time log\|spent.*hour\|spent.*minute"
+TIME_SHORTHAND="^[0-9]+h[0-9]*m?$\|^[0-9]+m$\|^[0-9]+\.[0-9]+h$"
+
+IS_TIME_LOG=0
+if echo "$PROMPT_LOWER" | grep -qE "(${TIME_SIGNALS//\\|/|})" 2>/dev/null; then
+  IS_TIME_LOG=1
+fi
+if echo "$PROMPT" | grep -qE "(${TIME_SHORTHAND//\\|/|})" 2>/dev/null; then
+  IS_TIME_LOG=1
+fi
+
+if [[ "$IS_TIME_LOG" -eq 1 ]]; then
+  python3 - "$CURRENT" <<'PYEOF'
+import json, sys
+current = sys.argv[1] if len(sys.argv) > 1 else ""
+issue_hint = f" for {current}" if current and current != "None" else ""
+msg = (
+    f"[jira-autopilot] Use /jira-stop to log time{issue_hint} — do NOT call mcp__atlassian__addWorklogToJiraIssue directly.\n"
+    "  /jira-stop will:\n"
+    "  • Build an enriched worklog from actual activity (files edited, commands run)\n"
+    "  • Apply time rounding from your config\n"
+    "  • Go through the approval flow based on your autonomy level\n"
+    "  • Prompt to open a PR if on a feature branch\n\n"
+    "Run /jira-stop now."
+)
+print(json.dumps({"systemMessage": msg}))
+PYEOF
+  exit 0
+fi
+
+# ── Task/fix intent with no active issue ─────────────────────────────────────
+[[ -n "$CURRENT" && "$CURRENT" != "None" ]] && exit 0
 
 TASK_SIGNALS="implement\|add feature\|add a\|build\|create\|develop\|write a\|make a\|set up\|setup\|refactor\|migrate\|integrate\|scaffold"
 BUG_SIGNALS="fix\|bug\|broken\|crash\|error\|not working\|failing\|regression\|issue with\|problem with\|debug"
@@ -38,7 +69,6 @@ fi
 
 [[ "$MATCHED" -eq 0 ]] && exit 0
 
-# Output a systemMessage that Claude will see before responding
 python3 - <<'PYEOF'
 import json, sys
 
