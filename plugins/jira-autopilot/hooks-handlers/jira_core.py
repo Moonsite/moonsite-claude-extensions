@@ -31,6 +31,12 @@ READ_ONLY_TOOLS = frozenset([
     "ListMcpResourcesTool", "BashOutput",
 ])
 
+# Skill names containing these substrings are treated as planning activities.
+PLANNING_SKILL_PATTERNS = frozenset(["plan", "brainstorm", "spec", "explore", "research"])
+
+# First file-write tool after plan mode ends planning automatically.
+PLANNING_IMPL_TOOLS = frozenset(["Edit", "Write", "MultiEdit", "NotebookEdit"])
+
 BUG_SIGNALS = [
     "fix", "bug", "broken", "crash", "error", "fail",
     "regression", "not working", "issue with",
@@ -205,8 +211,9 @@ def cmd_session_start(args):
         # Always sync autonomy/accuracy from config (may have changed via /jira-setup)
         existing["autonomyLevel"] = cfg.get("autonomyLevel", "C")
         existing["accuracy"] = cfg.get("accuracy", 5)
-        # Ensure activeTasks exists (may be missing in older sessions)
+        # Ensure activeTasks / activePlanning exist (may be missing in older sessions)
         existing.setdefault("activeTasks", {})
+        existing.setdefault("activePlanning", None)
         # Assign sessionId if missing (sessions created by /jira-start may lack one)
         if not existing.get("sessionId"):
             existing["sessionId"] = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -234,6 +241,7 @@ def cmd_session_start(args):
         "pendingWorklogs": [],
         "activityBuffer": [],
         "activeTasks": {},
+        "activePlanning": None,
     }
 
     # Detect issue from branch name
@@ -325,11 +333,17 @@ def cmd_log_activity(args):
     if not isinstance(tool_response, dict):
         tool_response = {}
 
+    cfg = load_config(root)
+
+    # Planning Skill — track before the read-only skip so timing is captured.
+    if tool_name == "Skill" and _is_planning_skill(tool_input.get("skill", "")):
+        _handle_planning_event(root, session, tool_name, tool_input, tool_response, cfg)
+        save_session(root, session)
+        return  # Skill itself is still read-only; don't log to activity buffer
+
     # Skip read-only tools
     if tool_name in READ_ONLY_TOOLS:
         return
-
-    cfg = load_config(root)
     activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
     file_path = tool_input.get("file_path", "")
     command = tool_input.get("command", "")
@@ -352,6 +366,11 @@ def cmd_log_activity(args):
     buffer = session.get("activityBuffer", [])
     buffer.append(activity)
     session["activityBuffer"] = buffer
+
+    # Track plan mode start/end and implementation-triggered plan end
+    if tool_name in ("EnterPlanMode", "ExitPlanMode") or \
+            (tool_name in PLANNING_IMPL_TOOLS and session.get("activePlanning")):
+        _handle_planning_event(root, session, tool_name, tool_input, tool_response, cfg)
 
     # Track task start/completion for per-task time logging
     if tool_name in ("TaskCreate", "TaskUpdate"):
@@ -443,6 +462,67 @@ def _handle_task_event(root: str, session: dict, tool_name: str,
         elapsed = int(time.time()) - task["startTime"]
         if elapsed >= 60:
             _log_task_time(root, session, cfg, task.get("subject") or subject, elapsed)
+
+
+def _is_planning_skill(skill_name: str) -> bool:
+    """Return True if the skill name matches a planning/research pattern."""
+    lower = skill_name.lower()
+    return any(p in lower for p in PLANNING_SKILL_PATTERNS)
+
+
+def _log_planning_time(root: str, session: dict, cfg: dict,
+                        subject: str, seconds: int, issue_key: "str | None" = None):
+    """Log planning time to a Jira sub-issue (accuracy>=8) or the target issue."""
+    accuracy = session.get("accuracy", cfg.get("accuracy", 5))
+    base_url = get_cred(root, "baseUrl")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+    # Fall back: planning issue → current issue → last parent
+    target = issue_key or session.get("currentIssue") or session.get("lastParentKey")
+    debug = cfg.get("debugLog", False)
+    if not (base_url and email and api_token) or not target:
+        debug_log(f"planning time skipped — no creds or target issue",
+                  category="planning", enabled=debug)
+        return
+    if accuracy >= 8:
+        project_key = cfg.get("projectKey", target.split("-")[0])
+        new_key = _create_jira_issue(base_url, email, api_token, project_key, subject, target)
+        if new_key:
+            post_worklog_to_jira(base_url, email, api_token, new_key, seconds, subject)
+            debug_log(f"planning='{subject}' created={new_key} logged={seconds}s",
+                      category="planning", enabled=debug)
+            return
+    post_worklog_to_jira(base_url, email, api_token, target, seconds, subject)
+    debug_log(f"planning='{subject}' logged={seconds}s to {target}",
+              category="planning", enabled=debug)
+
+
+def _handle_planning_event(root: str, session: dict, tool_name: str,
+                            tool_input: dict, tool_response: dict, cfg: dict):
+    """Track plan mode / planning-skill start and end for Jira time logging."""
+    active = session.get("activePlanning")
+    is_start = tool_name in ("EnterPlanMode",) or \
+               (tool_name == "Skill" and _is_planning_skill(tool_input.get("skill", "")))
+    is_end = tool_name in ("ExitPlanMode",) or tool_name in PLANNING_IMPL_TOOLS
+
+    if is_start and not active:
+        skill_name = tool_input.get("skill", "")
+        subject = f"Planning: {skill_name}" if skill_name else "Planning"
+        session["activePlanning"] = {
+            "startTime": int(time.time()),
+            "issueKey": session.get("currentIssue"),
+            "subject": subject,
+        }
+    elif is_end and active:
+        elapsed = int(time.time()) - active["startTime"]
+        session["activePlanning"] = None
+        if elapsed >= 60:
+            _log_planning_time(
+                root, session, cfg,
+                active.get("subject", "Planning"),
+                elapsed,
+                active.get("issueKey"),
+            )
 
 
 def _get_idle_threshold_seconds(cfg: dict) -> int:
@@ -752,6 +832,19 @@ def cmd_session_end(args):
     accuracy = session.get("accuracy", cfg.get("accuracy", 5))
     time_rounding = cfg.get("timeRounding", 15)
     debug = cfg.get("debugLog", False)
+
+    # Flush any in-progress planning session before archiving
+    active_planning = session.get("activePlanning")
+    if active_planning:
+        elapsed = int(time.time()) - active_planning["startTime"]
+        if elapsed >= 60:
+            _log_planning_time(
+                root, session, cfg,
+                active_planning.get("subject", "Planning"),
+                elapsed,
+                active_planning.get("issueKey"),
+            )
+        session["activePlanning"] = None
 
     # Drain any remaining activity buffer first
     buffer = session.get("activityBuffer", [])

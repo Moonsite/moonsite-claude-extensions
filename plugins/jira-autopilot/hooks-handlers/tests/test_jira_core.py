@@ -42,6 +42,9 @@ from jira_core import (
     _handle_task_event,
     _log_task_time,
     _create_jira_issue,
+    _is_planning_skill,
+    _handle_planning_event,
+    _log_planning_time,
 )
 
 
@@ -1732,3 +1735,258 @@ class TestCliWrappers:
              patch("jira_core.cmd_classify_issue") as mock_fn:
             jira_core.main()
         mock_fn.assert_called_once_with(["Fix bug"])
+
+
+# ── Planning time tracking ────────────────────────────────────────────────
+
+
+class TestPlanningTracking:
+    def _setup(self, tmp_path, accuracy=5, issue="TEST-1"):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "enabled": True, "debugLog": False,
+            "accuracy": accuracy, "projectKey": "TEST",
+        }))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "test@example.com", "apiToken": "tok",
+            "baseUrl": "https://test.atlassian.net",
+        }))
+        session = {
+            "sessionId": "test", "currentIssue": issue,
+            "activeIssues": {issue: {"startTime": 1000, "totalSeconds": 0}},
+            "accuracy": accuracy, "activityBuffer": [], "workChunks": [],
+            "activeTasks": {}, "activePlanning": None,
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        return claude_dir
+
+    # ── _is_planning_skill ────────────────────────────────────────────────
+
+    def test_recognises_brainstorming_skill(self):
+        assert _is_planning_skill("superpowers:brainstorming")
+
+    def test_recognises_plan_skill(self):
+        assert _is_planning_skill("superpowers:writing-plans")
+
+    def test_recognises_spec_skill(self):
+        assert _is_planning_skill("claude-spec:plan")
+
+    def test_recognises_explore_skill(self):
+        assert _is_planning_skill("claude-spec:deep-explore")
+
+    def test_ignores_unrelated_skill(self):
+        assert not _is_planning_skill("commit-commands:commit")
+
+    # ── EnterPlanMode starts planning ────────────────────────────────────
+
+    def test_enter_plan_mode_records_active_planning(self, tmp_path):
+        self._setup(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "EnterPlanMode",
+            "tool_input": {},
+            "tool_response": {},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"] is not None
+        assert "startTime" in session["activePlanning"]
+        assert session["activePlanning"]["issueKey"] == "TEST-1"
+
+    def test_enter_plan_mode_subject_is_planning(self, tmp_path):
+        self._setup(tmp_path)
+        tool_json = json.dumps({"tool_name": "EnterPlanMode", "tool_input": {}, "tool_response": {}})
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"]["subject"] == "Planning"
+
+    # ── Planning skill starts planning ───────────────────────────────────
+
+    def test_planning_skill_starts_planning(self, tmp_path):
+        self._setup(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Skill",
+            "tool_input": {"skill": "superpowers:brainstorming"},
+            "tool_response": {},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"] is not None
+        assert "brainstorming" in session["activePlanning"]["subject"]
+
+    def test_planning_skill_does_not_log_to_activity_buffer(self, tmp_path):
+        self._setup(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Skill",
+            "tool_input": {"skill": "superpowers:brainstorming"},
+            "tool_response": {},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activityBuffer"] == []
+
+    def test_non_planning_skill_still_skipped(self, tmp_path):
+        self._setup(tmp_path)
+        tool_json = json.dumps({
+            "tool_name": "Skill",
+            "tool_input": {"skill": "commit-commands:commit"},
+            "tool_response": {},
+        })
+        cmd_log_activity([str(tmp_path), tool_json])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"] is None
+
+    # ── ExitPlanMode ends planning and logs time ─────────────────────────
+
+    def test_exit_plan_mode_clears_active_planning(self, tmp_path):
+        self._setup(tmp_path)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activePlanning"] = {
+            "startTime": int(time.time()) - 120,
+            "issueKey": "TEST-1", "subject": "Planning",
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True):
+            cmd_log_activity([str(tmp_path), json.dumps({
+                "tool_name": "ExitPlanMode", "tool_input": {}, "tool_response": {},
+            })])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"] is None
+
+    def test_exit_plan_mode_low_accuracy_logs_to_current_issue(self, tmp_path):
+        self._setup(tmp_path, accuracy=5)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activePlanning"] = {
+            "startTime": int(time.time()) - 120,
+            "issueKey": "TEST-1", "subject": "Planning",
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), json.dumps({
+                "tool_name": "ExitPlanMode", "tool_input": {}, "tool_response": {},
+            })])
+        mock_post.assert_called_once()
+        assert mock_post.call_args[0][3] == "TEST-1"
+
+    def test_exit_plan_mode_high_accuracy_creates_subissue(self, tmp_path):
+        self._setup(tmp_path, accuracy=8)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activePlanning"] = {
+            "startTime": int(time.time()) - 120,
+            "issueKey": "TEST-1", "subject": "Planning: superpowers:brainstorming",
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core._create_jira_issue", return_value="TEST-99") as mock_create, \
+             patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), json.dumps({
+                "tool_name": "ExitPlanMode", "tool_input": {}, "tool_response": {},
+            })])
+        mock_create.assert_called_once()
+        assert mock_create.call_args[0][5] == "TEST-1"   # parent
+        assert mock_post.call_args[0][3] == "TEST-99"    # logged to new issue
+
+    # ── Implementation tool ends planning ────────────────────────────────
+
+    def test_edit_after_enter_plan_mode_ends_planning(self, tmp_path):
+        self._setup(tmp_path)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activePlanning"] = {
+            "startTime": int(time.time()) - 120,
+            "issueKey": "TEST-1", "subject": "Planning",
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), json.dumps({
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "src/auth.ts"},
+                "tool_response": {},
+            })])
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        assert session["activePlanning"] is None
+        mock_post.assert_called_once()
+
+    # ── Micro-planning skipped ────────────────────────────────────────────
+
+    def test_elapsed_under_60s_skips_logging(self, tmp_path):
+        self._setup(tmp_path)
+        session = json.loads((tmp_path / ".claude" / SESSION_NAME).read_text())
+        session["activePlanning"] = {
+            "startTime": int(time.time()) - 10,  # only 10s
+            "issueKey": "TEST-1", "subject": "Planning",
+        }
+        (tmp_path / ".claude" / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_log_activity([str(tmp_path), json.dumps({
+                "tool_name": "ExitPlanMode", "tool_input": {}, "tool_response": {},
+            })])
+        mock_post.assert_not_called()
+
+    # ── Fallback to lastParentKey when no currentIssue ───────────────────
+
+    def test_falls_back_to_last_parent_key(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"accuracy": 5, "debugLog": False}))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "t@t.com", "apiToken": "tok", "baseUrl": "https://test.atlassian.net",
+        }))
+        session = {
+            "sessionId": "t", "currentIssue": None, "lastParentKey": "TEST-10",
+            "activeIssues": {}, "accuracy": 5, "activityBuffer": [], "workChunks": [],
+            "activeTasks": {}, "activePlanning": None,
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            _log_planning_time(str(tmp_path), session, {}, "Planning", 120)
+        mock_post.assert_called_once()
+        assert mock_post.call_args[0][3] == "TEST-10"
+
+    # ── Session-end flushes active planning ──────────────────────────────
+
+    def test_session_end_flushes_active_planning(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({
+            "debugLog": False, "accuracy": 5, "timeRounding": 15, "autonomyLevel": "C",
+        }))
+        (claude_dir / LOCAL_CONFIG_NAME).write_text(json.dumps({
+            "email": "t@t.com", "apiToken": "tok", "baseUrl": "https://test.atlassian.net",
+        }))
+        now = int(time.time())
+        session = {
+            "sessionId": "t", "currentIssue": "TEST-1",
+            "autonomyLevel": "C", "accuracy": 5,
+            "activeIssues": {"TEST-1": {"startTime": now - 1800, "totalSeconds": 0, "paused": False}},
+            "workChunks": [{
+                "id": "c1", "issueKey": "TEST-1",
+                "startTime": now - 600, "endTime": now - 300,
+                "filesChanged": ["a.ts"],
+                "activities": [{"tool": "Edit", "type": "file_edit"}],
+                "idleGaps": [],
+            }],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+            "activeTasks": {},
+            "activePlanning": {
+                "startTime": now - 120,
+                "issueKey": "TEST-1",
+                "subject": "Planning: superpowers:brainstorming",
+            },
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+
+        with patch("jira_core.post_worklog_to_jira", return_value=True) as mock_post:
+            cmd_session_end([str(tmp_path)])
+
+        # activePlanning must be cleared
+        updated = json.loads((claude_dir / SESSION_NAME).read_text())
+        assert updated["activePlanning"] is None
+        # Planning worklog was posted
+        mock_post.assert_called_once()
+        assert mock_post.call_args[0][3] == "TEST-1"
