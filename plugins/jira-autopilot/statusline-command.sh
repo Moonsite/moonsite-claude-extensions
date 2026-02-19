@@ -174,7 +174,7 @@ fi
 
 # Assemble
 parts=()
-parts+=("${C_ICON}🗀${RESET} ${C_FOLDER}${folder_name}${RESET}")
+parts+=("${C_ICON}▸${RESET} ${C_FOLDER}${folder_name}${RESET}")
 
 if [ -n "$git_branch" ]; then
   parts+=("${C_ICON}⊕${RESET} ${C_REPO}${repo_name}${RESET}")
@@ -194,7 +194,7 @@ if [ -n "$jira_label" ]; then
 fi
 
 if [ -n "$is_planning" ]; then
-  parts+=("${C_ICON}📐${RESET} ${C_PLANNING}planning${RESET}")
+  parts+=("${C_ICON}~${RESET} ${C_PLANNING}planning${RESET}")
 fi
 
 parts+=("${C_ICON}◈${RESET} ${C_MODEL}${model_label}${RESET}")
