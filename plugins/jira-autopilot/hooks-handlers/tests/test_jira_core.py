@@ -1511,6 +1511,10 @@ class TestSessionEndExtra:
         remaining = [c for c in after_first["workChunks"] if c.get("issueKey") == "TEST-1"]
         assert remaining == [], "workChunks for TEST-1 must be cleared after session-end"
 
+        # startTime watermark should be reset to a recent timestamp
+        new_start = after_first["activeIssues"]["TEST-1"]["startTime"]
+        assert new_start > now - 600, "startTime must be reset to ~now after session-end"
+
         # Second session-end on the same (now-cleared) session
         cmd_session_end([str(tmp_path)])
         after_second = json.loads((claude_dir / SESSION_NAME).read_text())

@@ -801,9 +801,17 @@ def cmd_session_end(args):
 
     session["pendingWorklogs"] = pending
 
-    # Clear processed work chunks so the next session-end doesn't double-count them.
-    # Keep only chunks that belong to issues not tracked this session (shouldn't exist,
-    # but defensive) and reset each active issue's startTime watermark to now.
+    # Archive the full session snapshot BEFORE clearing chunks — preserves
+    # complete work history for /jira-summary and other tooling that reads archives.
+    archive_dir = os.path.join(root, ".claude", "jira-sessions")
+    os.makedirs(archive_dir, exist_ok=True)
+    session_id = session.get("sessionId", datetime.now().strftime("%Y%m%d-%H%M%S"))
+    archive_path = os.path.join(archive_dir, f"{session_id}.json")
+    with open(archive_path, "w") as f:
+        json.dump(session, f, indent=2)
+
+    # Clear processed work chunks from the live session so the next session-end
+    # doesn't re-sum them and post duplicate Jira worklogs.
     processed_keys = set(active_issues.keys())
     session["workChunks"] = [
         c for c in session.get("workChunks", [])
@@ -813,14 +821,6 @@ def cmd_session_end(args):
     for issue_key in processed_keys:
         if issue_key in session.get("activeIssues", {}):
             session["activeIssues"][issue_key]["startTime"] = now
-
-    # Archive session
-    archive_dir = os.path.join(root, ".claude", "jira-sessions")
-    os.makedirs(archive_dir, exist_ok=True)
-    session_id = session.get("sessionId", datetime.now().strftime("%Y%m%d-%H%M%S"))
-    archive_path = os.path.join(archive_dir, f"{session_id}.json")
-    with open(archive_path, "w") as f:
-        json.dump(session, f, indent=2)
 
     save_session(root, session)
 
