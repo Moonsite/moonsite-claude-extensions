@@ -29,6 +29,14 @@ CURRENT=$(json_get "$SESSION_FILE" "currentIssue")
 # Check if issue key already in the commit message
 echo "$COMMAND" | grep -q "$CURRENT" && exit 0
 
-# Suggest including issue key
-echo "[jira-autopilot] Active issue: $CURRENT. Consider including in commit message: $CURRENT: <message>"
-echo "[jira-autopilot] Context-switch reminder: If the conversation has shifted to a different topic or feature area since $CURRENT was started, consider using /jira-start to track the new work separately."
+# Output a systemMessage instructing Claude to include the issue key
+python3 -c "
+import json, sys
+key = sys.argv[1]
+msg = (
+    f'[jira-autopilot] Active issue: {key}\\n'
+    f'  - Include the issue key in the commit message: \"{key}: <description>\"\\n'
+    f'  - If this commit covers work unrelated to {key}, run /jira-start first to track it under a separate ticket and branch.'
+)
+print(json.dumps({'systemMessage': msg}))
+" "$CURRENT"

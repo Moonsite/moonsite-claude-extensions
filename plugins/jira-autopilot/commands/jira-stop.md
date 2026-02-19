@@ -128,3 +128,22 @@ Post the worklog silently and print a one-liner:
    Logged <rounded_time> to <KEY>: <summary>
    Total elapsed: <actual_minutes>m → logged as <rounded_time>
    ```
+
+10. **PR and branch cleanup prompt** — Check the current git branch:
+    ```bash
+    git rev-parse --abbrev-ref HEAD
+    ```
+    If the current branch is a feature branch (contains the issue key or starts with `feature/`), prompt:
+    ```
+    Work on <KEY> is logged. Would you like to:
+      1. Open a PR now  — push branch and run: gh pr create --title "<KEY>: <summary>" --body "..."
+      2. Keep working   — stay on this branch (more commits coming)
+      3. Switch to main — git checkout main (no PR yet)
+    ```
+    **Autonomy A/B**: Auto-suggest option 1 and execute if on a feature branch with unpushed commits.
+    **Autonomy C**: Always present the 3-option prompt above.
+
+    If option 1 is chosen, create the PR with:
+    - Title: `<KEY>: <enriched summary>`
+    - Body: bullet list of files changed + commands run from `rawFacts`
+    - Then switch to main: `git checkout main`

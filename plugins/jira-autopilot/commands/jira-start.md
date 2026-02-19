@@ -34,11 +34,15 @@ Check `currentIssue` in session state. If set, ask the user if they want to:
 3. **Update session state** in `<project-root>/.claude/jira-session.json`:
    - Add issue to `activeIssues` with summary, startTime, totalSeconds: 0, paused: false, autoApproveWorklogs: false
    - Set `currentIssue` to this key
-4. **Create feature branch** if not on a matching branch:
-   ```bash
-   git checkout -b feature/<KEY>-<slug>
-   ```
-5. Display: "Started tracking **<KEY>**: <summary>. Timer running."
+4. **Create and switch to a feature branch** — always do this unless the current branch already contains the issue key:
+   - Check current branch: `git rev-parse --abbrev-ref HEAD`
+   - If the current branch already contains `<KEY>` (case-insensitive), stay on it.
+   - Otherwise, create a new branch using the slug of the issue summary (lowercase, hyphens, max 40 chars):
+     ```bash
+     git checkout -b feature/<KEY>-<slug>
+     ```
+   - Never implement on `main`, `master`, or `develop` — always branch first.
+5. Display: "Started tracking **<KEY>**: <summary>. Branch: `feature/<KEY>-<slug>`. Timer running."
 
 ---
 
