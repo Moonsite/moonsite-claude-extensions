@@ -29,9 +29,10 @@ You are stopping work on the current Jira task and logging time with a worklog a
    }
    ```
 
-3. **Enrich summary** — Use the `rawFacts` from the worklog builder along with your conversation context to write a 1-3 line human-readable work summary. This should describe *what was accomplished*, not just list files. Example:
-   - Raw: `files: [auth.ts, middleware.ts], commands: [npm test]`
-   - Enriched: "Refactored auth middleware to support SSO tokens. Updated middleware chain. All tests passing."
+3. **Enrich summary** — Use the `rawFacts` from the worklog builder along with your conversation context to write a 1-3 line human-readable work summary. This should describe *what was accomplished*, not just list files.
+   - The worklog builder returns a `logLanguage` field (e.g. `"Hebrew"`, `"Russian"`, `"English"`). **Write the enriched summary in that language.**
+   - Example (English): Raw `files: [auth.ts, middleware.ts], commands: [npm test]` → "Refactored auth middleware to support SSO tokens. All tests passing."
+   - Example (Hebrew): "עודכנה מחלקת האותנטיקציה לתמיכה ב-SSO. כל הבדיקות עברו בהצלחה."
 
 4. **Calculate display time** — Convert seconds to a human-readable format:
    - Round up to nearest increment from `timeRounding` in config (default 15 min)

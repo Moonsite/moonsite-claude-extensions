@@ -76,7 +76,19 @@ You are configuring the jira-autopilot plugin for this project.
    ```
    Default: **5**. Let the user pick a number 1-10.
 
-8. **Additional settings** — Show defaults and let the user override:
+8. **Worklog language** — Ask which language worklog descriptions should be written in:
+   ```
+   What language should worklog descriptions be written in?
+     1. English (default)
+     2. Hebrew (עברית)
+     3. Russian (Русский)
+     4. Other — type a language name
+   ```
+   - Default: **English**.
+   - Save to project config as `"logLanguage": "<language>"`.
+   - Also ask: "Set this as your global default for all projects?" — if yes, save `logLanguage` to `~/.claude/jira-autopilot.global.json` too.
+
+9. **Additional settings** — Show defaults and let the user override:
    - Branch pattern: `^(?:feature|fix|hotfix|chore|docs)/({key}-\\d+)` (where `{key}` = project key)
    - Commit pattern: `{key}-\\d+:`
    - Time rounding: derived from accuracy (low=30, medium=15, high=1), but can override
@@ -85,7 +97,7 @@ You are configuring the jira-autopilot plugin for this project.
    - Auto-create issues: false (ask first before creating)
    - Ask if these defaults are OK or if the user wants to change any.
 
-9. **Write config files**:
+10. **Write config files**:
    - `<project-root>/.claude/jira-autopilot.json` (committed to repo):
      ```json
      {
@@ -100,6 +112,7 @@ You are configuring the jira-autopilot plugin for this project.
        "timeRounding": <15>,
        "idleThreshold": <15>,
        "autoCreate": false,
+       "logLanguage": "<language>",
        "defaultLabels": ["jira-autopilot"],
        "defaultComponent": null,
        "defaultFixVersion": null,
@@ -116,7 +129,7 @@ You are configuring the jira-autopilot plugin for this project.
      }
      ```
 
-10. **Offer to save credentials globally**:
+11. **Offer to save credentials globally**:
     - Ask: "Save these credentials globally so you don't have to re-enter them for other projects? (yes/no)"
     - If yes, write `~/.claude/jira-autopilot.global.json`:
       ```json
@@ -129,7 +142,7 @@ You are configuring the jira-autopilot plugin for this project.
       }
       ```
 
-11. **Update `.gitignore`** — ensure these lines exist:
+12. **Update `.gitignore`** — ensure these lines exist:
     ```
     .claude/current-task.json
     .claude/jira-session.json
@@ -138,9 +151,9 @@ You are configuring the jira-autopilot plugin for this project.
     .claude/jira-autopilot.declined
     ```
 
-12. **Remove** `.claude/jira-autopilot.declined` if it exists.
+13. **Remove** `.claude/jira-autopilot.declined` if it exists.
 
-13. **Confirm** setup is complete and show saved configuration summary, including:
+14. **Confirm** setup is complete and show saved configuration summary, including:
     - Project key
     - Connected as (display name)
     - Autonomy level (with brief description)

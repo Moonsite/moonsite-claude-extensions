@@ -95,6 +95,14 @@ def get_cred(root: str, field: str) -> str:
     return val or ""
 
 
+def get_log_language(root: str) -> str:
+    """Return the configured worklog language. Project config overrides global default."""
+    lang = load_config(root).get("logLanguage", "")
+    if not lang:
+        lang = load_global_config().get("logLanguage", "")
+    return lang or "English"
+
+
 # ── Debug Logging ──────────────────────────────────────────────────────────
 
 def debug_log(message: str, category: str = "general", enabled: bool = True,
@@ -260,7 +268,8 @@ def cmd_add_worklog(args):
         print("Error: missing credentials", file=sys.stderr)
         sys.exit(1)
 
-    ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, comment)
+    ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, comment,
+                              language=get_log_language(root))
     if ok:
         print(json.dumps({"ok": True, "issue": issue_key, "seconds": seconds}))
     else:
@@ -1059,6 +1068,7 @@ def cmd_build_worklog(args):
         print("{}", file=sys.stderr)
         return
     result = build_worklog(root, issue_key)
+    result["logLanguage"] = get_log_language(root)
     print(json.dumps(result))
 
 
@@ -1206,7 +1216,8 @@ def _text_to_adf(text: str) -> dict:
 
 
 def post_worklog_to_jira(base_url: str, email: str, api_token: str,
-                          issue_key: str, seconds: int, comment: str) -> bool:
+                          issue_key: str, seconds: int, comment: str,
+                          language: str = "English") -> bool:
     """POST a worklog entry to Jira Cloud REST API. Returns True on success."""
     url = f"{base_url.rstrip('/')}/rest/api/3/issue/{issue_key}/worklog"
     auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
