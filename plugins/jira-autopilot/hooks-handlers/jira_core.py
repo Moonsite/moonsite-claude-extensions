@@ -191,9 +191,13 @@ def _detect_issue_from_branch(root: str, cfg: dict) -> str | None:
         return None
     if not branch:
         return None
+    debug_log(f"Branch detection: branch={branch!r} pattern={pattern!r}",
+              category="session-start")
     m = re.search(pattern, branch)
     if m and m.groups():
         return m.group(1)
+    debug_log(f"Branch detection: no match for branch={branch!r}",
+              category="session-start")
     return None
 
 
@@ -203,6 +207,8 @@ def cmd_session_start(args):
 
     cfg = load_config(root)
     if not cfg.get("enabled", True):
+        debug_log("Plugin disabled via config — skipping session start",
+                  category="session-start", enabled=cfg.get("debugLog", False))
         return
 
     existing = load_session(root)
@@ -343,6 +349,8 @@ def cmd_log_activity(args):
 
     # Skip read-only tools
     if tool_name in READ_ONLY_TOOLS:
+        debug_log(f"Skipping read-only tool={tool_name}",
+                  category="log-activity", enabled=cfg.get("debugLog", False))
         return
     activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
     file_path = tool_input.get("file_path", "")
@@ -351,6 +359,8 @@ def cmd_log_activity(args):
     # Skip writes to internal plugin state/config files — these are noise,
     # not user work, and may contain sensitive paths or credential data
     if file_path and "/.claude/" in file_path:
+        debug_log(f"Skipping internal .claude/ write tool={tool_name} file={file_path}",
+                  category="log-activity", enabled=cfg.get("debugLog", False))
         return
 
     activity = {
@@ -407,7 +417,14 @@ def _create_jira_issue(base_url: str, email: str, api_token: str,
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
             return data.get("key")
-    except Exception:
+    except urllib.error.HTTPError as e:
+        debug_log(f"create_issue HTTP error status={e.code} reason={e.reason} "
+                  f"parent={parent_key} project={project_key}",
+                  category="jira-api")
+        return None
+    except Exception as e:
+        debug_log(f"create_issue error={type(e).__name__}: {e}",
+                  category="jira-api")
         return None
 
 
@@ -450,6 +467,7 @@ def _handle_task_event(root: str, session: dict, tool_name: str,
     status = resp.get("status", "") or tool_input.get("status", "")
     if not task_id or not status:
         return
+    debug = cfg.get("debugLog", False)
     active_tasks = session.setdefault("activeTasks", {})
     if status == "in_progress" and task_id not in active_tasks:
         active_tasks[task_id] = {
@@ -457,10 +475,16 @@ def _handle_task_event(root: str, session: dict, tool_name: str,
             "startTime": int(time.time()),
             "jiraKey": None,
         }
+        debug_log(f"Task started taskId={task_id} subject={subject!r}",
+                  category="task-worklog", enabled=debug)
     elif status == "completed" and task_id in active_tasks:
         task = active_tasks.pop(task_id)
         elapsed = int(time.time()) - task["startTime"]
-        if elapsed >= 60:
+        if elapsed < 60:
+            debug_log(f"Task discarded (elapsed={elapsed}s < 60s) "
+                      f"taskId={task_id} subject={task.get('subject', '')!r}",
+                      category="task-worklog", enabled=debug)
+        else:
             _log_task_time(root, session, cfg, task.get("subject") or subject, elapsed)
 
 
@@ -505,6 +529,7 @@ def _handle_planning_event(root: str, session: dict, tool_name: str,
                (tool_name == "Skill" and _is_planning_skill(tool_input.get("skill", "")))
     is_end = tool_name in ("ExitPlanMode",) or tool_name in PLANNING_IMPL_TOOLS
 
+    debug = cfg.get("debugLog", False)
     if is_start and not active:
         skill_name = tool_input.get("skill", "")
         subject = f"Planning: {skill_name}" if skill_name else "Planning"
@@ -513,16 +538,22 @@ def _handle_planning_event(root: str, session: dict, tool_name: str,
             "issueKey": session.get("currentIssue"),
             "subject": subject,
         }
+        debug_log(f"Planning started subject={subject!r} trigger={tool_name}",
+                  category="planning", enabled=debug)
     elif is_end and active:
         elapsed = int(time.time()) - active["startTime"]
         session["activePlanning"] = None
-        if elapsed >= 60:
-            _log_planning_time(
-                root, session, cfg,
-                active.get("subject", "Planning"),
-                elapsed,
-                active.get("issueKey"),
-            )
+        if elapsed < 60:
+            debug_log(f"Planning discarded (elapsed={elapsed}s < 60s) "
+                      f"subject={active.get('subject', '')!r}",
+                      category="planning", enabled=debug)
+            return
+        _log_planning_time(
+            root, session, cfg,
+            active.get("subject", "Planning"),
+            elapsed,
+            active.get("issueKey"),
+        )
 
 
 def _get_idle_threshold_seconds(cfg: dict) -> int:
@@ -688,8 +719,16 @@ def cmd_drain_buffer(args):
     session["activityBuffer"] = []
     save_session(root, session)
 
+    idle_splits = sum(1 for g in groups if g.get("idle_before"))
+    issue_splits = sum(
+        1 for i in range(1, len(groups))
+        if (groups[i]["activities"][0].get("issueKey") !=
+            groups[i - 1]["activities"][-1].get("issueKey"))
+    )
+    dir_splits = sum(1 for g in groups if g.get("dir_shift"))
     debug_log(
-        f"chunks={len(groups)} total_chunks={len(chunks)}",
+        f"new_chunks={len(groups)} total_chunks={len(chunks)} "
+        f"splits(idle={idle_splits} issue_change={issue_splits} dir_shift={dir_splits})",
         category="drain-buffer",
         enabled=cfg.get("debugLog", False),
     )
@@ -871,7 +910,16 @@ def cmd_session_end(args):
             start = issue_data.get("startTime", 0)
             if start > 0 and has_chunks:
                 raw_seconds = int(time.time()) - start
+                debug_log(
+                    f"issue={issue_key} using wallclock fallback raw={raw_seconds}s",
+                    category="session-end", enabled=debug,
+                )
             if raw_seconds <= 0:
+                debug_log(
+                    f"issue={issue_key} skipped — no activity and no wallclock fallback "
+                    f"(has_chunks={has_chunks} start={start})",
+                    category="session-end", enabled=debug,
+                )
                 continue
 
         rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
@@ -954,8 +1002,14 @@ def post_worklog_to_jira(base_url: str, email: str, api_token: str,
         with urllib.request.urlopen(req, timeout=15) as resp:
             return resp.status in (200, 201)
     except urllib.error.HTTPError as e:
+        debug_log(f"post_worklog HTTP error status={e.code} reason={e.reason} "
+                  f"issue={issue_key} seconds={seconds}",
+                  category="jira-api")
         return False
-    except Exception:
+    except Exception as e:
+        debug_log(f"post_worklog error={type(e).__name__}: {e} "
+                  f"issue={issue_key} seconds={seconds}",
+                  category="jira-api")
         return False
 
 
