@@ -28,6 +28,18 @@ if os.path.exists(cf):
     with open(cf) as f:
         cfg = json.load(f)
 
+global_cfg = {}
+global_path = os.path.join(os.path.expanduser("~"), ".claude", "jira-autopilot.global.json")
+if os.path.exists(global_path):
+    with open(global_path) as f:
+        global_cfg = json.load(f)
+
+def cfg_get(key, default=None):
+    """Project config takes priority, then global config, then default."""
+    if key in cfg:
+        return cfg[key]
+    return global_cfg.get(key, default)
+
 autonomy_desc = {
     "C": "Cautious — asks before every action",
     "B": "Balanced — shows summaries, auto-proceeds",
@@ -43,7 +55,7 @@ print("════════════════════════�
 print(f"Project:  {cfg.get('projectKey', '—')}")
 print(f"Autonomy: {autonomy} ({autonomy_desc.get(autonomy, '—')})")
 print(f"Accuracy: {accuracy}/10  rounding={cfg.get('timeRounding', 15)}m  idle={cfg.get('idleThreshold', 15)}m")
-print(f"Language: {cfg.get('logLanguage', '—')}")
+print(f"Language: {cfg_get('logLanguage', '—')}")
 print(f"Debug:    {'enabled' if cfg.get('debugLog') else 'disabled'}")
 print(f"\nCurrent issue: {current}")
 
