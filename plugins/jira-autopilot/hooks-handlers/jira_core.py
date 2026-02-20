@@ -825,7 +825,8 @@ def _handle_task_event(root: str, session: dict, tool_name: str,
     """Track task start/completion for per-task time logging."""
     resp = tool_response if isinstance(tool_response, dict) else {}
     task_id = str(resp.get("taskId") or tool_input.get("taskId", ""))
-    subject = resp.get("subject", "")
+    # Subject can come from response (TaskCreate) or input (TaskUpdate)
+    subject = resp.get("subject", "") or tool_input.get("subject", "")
     status = resp.get("status", "") or tool_input.get("status", "")
     if not task_id or not status:
         return
@@ -1371,6 +1372,22 @@ def cmd_session_end(args):
         )
 
     session["pendingWorklogs"] = pending
+
+    # Prune paused ghost issues: paused with no logged seconds and no work chunks.
+    # These accumulate when issues are added via /jira-start but never worked on.
+    ghost_keys = [
+        key for key, data in active_issues.items()
+        if data.get("paused", False)
+        and data.get("totalSeconds", 0) == 0
+        and not any(c.get("issueKey") == key for c in session.get("workChunks", []))
+        and not any(w.get("issueKey") == key for w in pending if w.get("seconds", 0) > 0)
+    ]
+    for key in ghost_keys:
+        del session["activeIssues"][key]
+        debug_log(
+            f"Pruned ghost issue {key} (paused, no activity)",
+            category="session-end", enabled=debug,
+        )
 
     # Archive the full session snapshot BEFORE clearing chunks — preserves
     # complete work history for /jira-summary and other tooling that reads archives.
