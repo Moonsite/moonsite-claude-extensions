@@ -1623,7 +1623,11 @@ def post_worklog_to_jira(base_url: str, email: str, api_token: str,
     url = f"{base_url.rstrip('/')}/rest/api/3/issue/{issue_key}/worklog"
     auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
     # Fallback description when caller provides no subject (e.g. empty task name)
-    effective_comment = comment.strip() or f"Work logged via jira-autopilot ({seconds // 60}m)"
+    if not comment.strip():
+        minutes = seconds // 60
+        effective_comment = f"עבודה על המשימה ({minutes} דקות)" if language == "Hebrew" else f"Work on task ({minutes}m)"
+    else:
+        effective_comment = comment.strip()
     payload = json.dumps({
         "timeSpentSeconds": seconds,
         "comment": _text_to_adf(effective_comment),
@@ -1667,6 +1671,7 @@ def cmd_post_worklogs(args):
 
     pending = session.get("pendingWorklogs", [])
     posted_any = False
+    lang = get_log_language(root)
 
     for entry in pending:
         if entry.get("status") != "approved":
@@ -1677,7 +1682,17 @@ def cmd_post_worklogs(args):
         if not issue_key or seconds <= 0:
             continue
 
-        ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, summary)
+        # Rebuild summary from rawFacts if missing (e.g. older entries before summary was stored)
+        if not summary.strip():
+            raw_facts = entry.get("rawFacts", {})
+            files = raw_facts.get("files", [])
+            basenames = [os.path.basename(f) for f in files if f]
+            if basenames:
+                shown = basenames[:8]
+                rest = len(basenames) - len(shown)
+                summary = ", ".join(shown) + (f" +{rest}" if rest else "")
+
+        ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, summary, language=lang)
         entry["status"] = "posted" if ok else "failed"
         posted_any = True
         debug_log(

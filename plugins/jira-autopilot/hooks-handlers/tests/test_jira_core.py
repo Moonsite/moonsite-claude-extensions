@@ -801,7 +801,7 @@ class TestPostWorklogs:
             cmd_post_worklogs([str(tmp_path)])
         mock_post.assert_called_once_with(
             "https://test.atlassian.net", "test@example.com", "test-token",
-            "TEST-1", 900, "Fixed bug",
+            "TEST-1", 900, "Fixed bug", language="Hebrew",
         )
         updated = json.loads((claude_dir / SESSION_NAME).read_text())
         assert updated["pendingWorklogs"][0]["status"] == "posted"
