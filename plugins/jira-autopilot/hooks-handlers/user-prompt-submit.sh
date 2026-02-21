@@ -138,13 +138,8 @@ if [[ -z "$CURRENT" || "$CURRENT" == "None" ]]; then
   python3 - <<'PYEOF'
 import json, sys
 msg = (
-    "[jira-autopilot] No active Jira issue detected. Before writing any code:\n"
-    "  1. Run /jira-start to create or link a Jira ticket for this work.\n"
-    "  2. A feature branch (feature/<KEY>-<slug>) will be created automatically.\n"
-    "  3. Keep all changes for this ticket on that branch.\n"
-    "  4. Commit with the ticket key in the message (e.g. 'PROJ-42: add login button').\n"
-    "  5. When done, run /jira-stop — you will be prompted to open a PR.\n\n"
-    "Proceed only after a Jira issue is active."
+    "[jira-autopilot] Work is being captured (no issue assigned yet). "
+    "Run /jira-start to link to a Jira issue, or continue — work will be auto-attributed at session end."
 )
 print(json.dumps({"systemMessage": msg}))
 PYEOF
@@ -155,11 +150,8 @@ else
 import json, sys
 current = sys.argv[1]
 msg = (
-    f"[jira-autopilot] New task or bug detected while {current} is active.\n"
-    f"  Create a Jira sub-task or linked issue for this work BEFORE writing any code:\n"
-    f"  • Use /jira-start <summary> to create a new issue linked to {current}\n"
-    f"  • Or use /jira-start <KEY> to switch to an existing issue\n\n"
-    f"  Do NOT accumulate unrelated work under {current}. Each distinct task needs its own ticket."
+    f"[jira-autopilot] New task or bug detected while {current} is active. "
+    f"Run /jira-start to create a new issue linked to {current}, or use it standalone."
 )
 print(json.dumps({"systemMessage": msg}))
 PYEOF

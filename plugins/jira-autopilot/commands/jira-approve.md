@@ -11,8 +11,8 @@ Review unattributed work chunks and deferred worklogs, then create or link Jira 
 ## Steps
 
 1. **Read** `<project-root>/.claude/jira-session.json`
-   - Check for `pendingIssues` with status `awaiting_approval` AND `pendingWorklogs` with status `deferred`.
-   - If neither exists, tell user "No pending work items to review."
+   - Check for `pendingIssues` with status `awaiting_approval` AND `pendingWorklogs` with status `deferred` or `unattributed`.
+   - If none exist, tell user "No pending work items to review."
 
 2. **For each pending issue**, show:
    ```
@@ -73,6 +73,45 @@ Review unattributed work chunks and deferred worklogs, then create or link Jira 
    ```
    Mark entry status as `posted`.
 
-8. **Update** `jira-session.json` with all changes.
+8. **Unattributed Work**
 
-9. **Show summary** of actions taken.
+   For `pendingWorklogs` entries with `status: "unattributed"` (issueKey is null):
+
+   Show:
+   ```
+   Unattributed Work #<n>
+   Time: <rounded time>  
+   Files: <list from rawFacts.files, if any>
+   Activities: <rawFacts.activityCount> tool calls
+   ```
+
+   Ask the user:
+   ```
+   What should I do with this time?
+     1. Create a new Jira issue for this work
+     2. Log to existing issue (you provide key)
+     3. Drop entirely
+   ```
+
+   **On "Create new issue"**:
+   - Run: `python3 <plugin-root>/hooks-handlers/jira_core.py auto-create-issue "<project-root>" "<summary_hint_from_files>"`
+   - Extract the new key from the result
+   - Post worklog to the new key using:
+     ```bash
+     python3 <plugin-root>/hooks-handlers/jira_core.py add-worklog \
+       "<project-root>" "<newKey>" <seconds> "<summary from rawFacts>"
+     ```
+   - Update entry status to `"posted"`
+
+   **On "Log to existing"**:
+   - Ask user for the issue key
+   - Verify it exists (via MCP or REST)
+   - Post worklog to that key
+   - Update entry status to `"posted"`
+
+   **On "Drop"**:
+   - Remove the entry or set status to `"dropped"`
+
+9. **Update** `jira-session.json` with all changes.
+
+10. **Show summary** of actions taken.
