@@ -2420,3 +2420,20 @@ class TestClaimNullChunks:
         count = _claim_null_chunks(session, "PROJ-99")
         assert count == 1
         assert session["workChunks"][0]["issueKey"] == "PROJ-99"
+
+    def test_claims_multiple_null_chunks_and_accumulates_time(self):
+        session = self._make_session(
+            chunks=[
+                {"id": "c1", "issueKey": None, "startTime": 1000, "endTime": 2000,
+                 "filesChanged": [], "activities": [], "idleGaps": []},
+                {"id": "c2", "issueKey": None, "startTime": 2000, "endTime": 3000,
+                 "filesChanged": [], "activities": [], "idleGaps": []},
+                {"id": "c3", "issueKey": "PROJ-99", "startTime": 3000, "endTime": 4000,
+                 "filesChanged": [], "activities": [], "idleGaps": []},
+            ],
+            active_issues={"PROJ-1": {"startTime": 500, "totalSeconds": 100, "paused": False}},
+        )
+        count = _claim_null_chunks(session, "PROJ-1")
+        assert count == 2  # only the two null chunks
+        assert session["activeIssues"]["PROJ-1"]["totalSeconds"] == 2100  # 100 + 1000 + 1000
+        assert session["workChunks"][2]["issueKey"] == "PROJ-99"  # attributed chunk untouched
