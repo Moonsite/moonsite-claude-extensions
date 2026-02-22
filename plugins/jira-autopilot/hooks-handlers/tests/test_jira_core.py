@@ -51,6 +51,8 @@ from jira_core import (
     _is_duplicate_issue,
     _attempt_auto_create,
     _claim_null_chunks,
+    MAX_WORKLOG_SECONDS,
+    STALE_ISSUE_SECONDS,
 )
 
 
@@ -1429,8 +1431,8 @@ class TestSessionEndExtra:
         assert updated["activityBuffer"] == []
         assert len(updated.get("pendingWorklogs", [])) > 0
 
-    def test_fallback_to_wallclock_only_when_issue_has_activity(self, tmp_path):
-        """Wallclock fallback fires only when the issue has buffered activity."""
+    def test_no_wallclock_fallback_for_single_activity(self, tmp_path):
+        """A single buffered activity with 0 chunk span should NOT inflate to wallclock time."""
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         (claude_dir / CONFIG_NAME).write_text(json.dumps({
@@ -1444,7 +1446,6 @@ class TestSessionEndExtra:
                 "TEST-1": {"startTime": now - 1800, "totalSeconds": 0, "paused": False},
             },
             "workChunks": [],
-            # Activity buffer has an entry for TEST-1 → wallclock fallback should fire
             "activityBuffer": [
                 {"timestamp": now - 60, "tool": "Edit", "file": "a.ts",
                  "type": "file_edit", "issueKey": "TEST-1"},
@@ -1454,8 +1455,8 @@ class TestSessionEndExtra:
         (claude_dir / SESSION_NAME).write_text(json.dumps(session))
         cmd_session_end([str(tmp_path)])
         updated = json.loads((claude_dir / SESSION_NAME).read_text())
-        assert len(updated["pendingWorklogs"]) == 1
-        assert updated["pendingWorklogs"][0]["seconds"] > 0
+        # Single activity creates a chunk with start==end, so 0 seconds — no worklog
+        assert updated["pendingWorklogs"] == []
 
     def test_no_phantom_worklog_for_branch_issue_with_no_activity(self, tmp_path):
         """Auto-detected branch issue with no activity must not generate a worklog.
@@ -2673,3 +2674,147 @@ class TestFlushPeriodicUnattributed:
         saved = load_session(root)
         pending = [p for p in saved.get("pendingWorklogs", []) if p.get("status") == "unattributed"]
         assert len(pending) == 0
+
+
+# ── Bug fix tests: corruption, inflated worklogs, stale issues ────────────
+
+
+class TestCorruptSessionResilience:
+    """load_session returns {} on corrupt JSON instead of crashing."""
+
+    def test_corrupt_json_returns_empty(self, tmp_path):
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text("{bad json")
+        result = load_session(str(tmp_path))
+        assert result == {}
+
+    def test_valid_json_still_works(self, tmp_path):
+        data = {"sessionId": "test", "activeIssues": {}}
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text(json.dumps(data))
+        result = load_session(str(tmp_path))
+        assert result["sessionId"] == "test"
+
+
+class TestAtomicSaveSession:
+    """save_session writes valid JSON via atomic replace."""
+
+    def test_roundtrip(self, tmp_path):
+        root = str(tmp_path)
+        data = {"sessionId": "rt", "activeIssues": {"X-1": {"startTime": 100}}}
+        save_session(root, data)
+        loaded = load_session(root)
+        assert loaded == data
+
+    def test_no_temp_files_left(self, tmp_path):
+        root = str(tmp_path)
+        save_session(root, {"sessionId": "clean"})
+        claude_dir = tmp_path / ".claude"
+        tmp_files = list(claude_dir.glob("*.tmp"))
+        assert tmp_files == []
+
+
+class TestWorklogSanityCap:
+    """build_worklog caps time at MAX_WORKLOG_SECONDS."""
+
+    def test_capped_when_exceeds_max(self, tmp_path):
+        root = str(tmp_path)
+        now = int(time.time())
+        session = {
+            "activeIssues": {"CAP-1": {"startTime": now - 20000, "totalSeconds": 0}},
+            "workChunks": [{
+                "id": "c1",
+                "issueKey": "CAP-1",
+                "startTime": now - 20000,
+                "endTime": now,
+                "activities": [{"timestamp": now, "tool": "Edit", "type": "file_edit"}],
+                "filesChanged": ["a.py"],
+                "idleGaps": [],
+            }],
+            "activityBuffer": [],
+        }
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text(json.dumps(session))
+        (tmp_path / ".claude" / "jira-autopilot.json").write_text("{}")
+
+        result = build_worklog(root, "CAP-1")
+        assert result["seconds"] == MAX_WORKLOG_SECONDS
+        assert result["capped"] is True
+
+    def test_not_capped_when_under_max(self, tmp_path):
+        root = str(tmp_path)
+        now = int(time.time())
+        session = {
+            "activeIssues": {"OK-1": {"startTime": now - 3600, "totalSeconds": 0}},
+            "workChunks": [{
+                "id": "c1",
+                "issueKey": "OK-1",
+                "startTime": now - 3600,
+                "endTime": now,
+                "activities": [{"timestamp": now, "tool": "Edit", "type": "file_edit"}],
+                "filesChanged": ["a.py"],
+                "idleGaps": [],
+            }],
+            "activityBuffer": [],
+        }
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text(json.dumps(session))
+        (tmp_path / ".claude" / "jira-autopilot.json").write_text("{}")
+
+        result = build_worklog(root, "OK-1")
+        assert result["seconds"] == 3600
+        assert "capped" not in result
+
+
+class TestStaleIssueCleanup:
+    """cmd_session_start removes stale issues older than 24h with no work."""
+
+    @patch("jira_core.subprocess.run")
+    def test_stale_issue_removed(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(stdout="main\n", returncode=0)
+        root = str(tmp_path)
+        now = int(time.time())
+        session = {
+            "sessionId": "stale-test",
+            "activeIssues": {
+                "STALE-1": {"startTime": now - 100000, "totalSeconds": 0, "paused": False},
+                "FRESH-1": {"startTime": now - 3600, "totalSeconds": 0, "paused": False},
+            },
+            "currentIssue": "STALE-1",
+            "workChunks": [],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text(json.dumps(session))
+        (tmp_path / ".claude" / "jira-autopilot.json").write_text(json.dumps({"projectKey": "TEST"}))
+
+        cmd_session_start([root])
+        saved = load_session(root)
+        assert "STALE-1" not in saved.get("activeIssues", {})
+        assert "FRESH-1" in saved.get("activeIssues", {})
+        assert saved.get("currentIssue") is None
+
+    @patch("jira_core.subprocess.run")
+    def test_stale_issue_with_chunks_preserved(self, mock_run, tmp_path):
+        """Issues with work chunks are NOT removed even if old."""
+        mock_run.return_value = MagicMock(stdout="main\n", returncode=0)
+        root = str(tmp_path)
+        now = int(time.time())
+        session = {
+            "sessionId": "keep-test",
+            "activeIssues": {
+                "OLD-1": {"startTime": now - 100000, "totalSeconds": 0, "paused": False},
+            },
+            "currentIssue": "OLD-1",
+            "workChunks": [{"id": "c1", "issueKey": "OLD-1", "startTime": now - 100000, "endTime": now - 99000}],
+            "activityBuffer": [],
+            "pendingWorklogs": [],
+        }
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "jira-session.json").write_text(json.dumps(session))
+        (tmp_path / ".claude" / "jira-autopilot.json").write_text(json.dumps({"projectKey": "TEST"}))
+
+        cmd_session_start([root])
+        saved = load_session(root)
+        assert "OLD-1" in saved.get("activeIssues", {})

@@ -9,6 +9,7 @@ import sys
 import time
 import math
 import subprocess
+import tempfile
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -23,6 +24,8 @@ GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "jira-autopilot.global.json"
 SESSION_NAME = "jira-session.json"
 DEBUG_LOG_PATH = Path.home() / ".claude" / "jira-autopilot-debug.log"
 MAX_LOG_SIZE = 1_000_000  # 1MB
+MAX_WORKLOG_SECONDS = 14400  # 4 hours — sanity cap for a single worklog
+STALE_ISSUE_SECONDS = 86400  # 24 hours — threshold for stale issue cleanup
 
 READ_ONLY_TOOLS = frozenset([
     "Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
@@ -75,16 +78,30 @@ def load_global_config() -> dict:
 def load_session(root: str) -> dict:
     path = os.path.join(root, ".claude", SESSION_NAME)
     if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            debug_log(f"Corrupt session file, resetting: {e}", category="session-load")
+            return {}
     return {}
 
 
 def save_session(root: str, data: dict):
     path = os.path.join(root, ".claude", SESSION_NAME)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    dir_path = os.path.dirname(path)
+    os.makedirs(dir_path, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def get_cred(root: str, field: str) -> str:
@@ -600,6 +617,24 @@ def cmd_session_start(args):
     existing = load_session(root)
     # If there's already an active session with issues, preserve it
     if existing.get("activeIssues"):
+        # Prune stale issues: older than 24h with zero work chunks
+        now = int(time.time())
+        stale_keys = []
+        for key, data in existing["activeIssues"].items():
+            start = data.get("startTime", 0)
+            if start > 0 and (now - start) > STALE_ISSUE_SECONDS:
+                has_chunks = any(
+                    c.get("issueKey") == key for c in existing.get("workChunks", [])
+                )
+                if not has_chunks and data.get("totalSeconds", 0) == 0:
+                    stale_keys.append(key)
+        for key in stale_keys:
+            del existing["activeIssues"][key]
+            if existing.get("currentIssue") == key:
+                existing["currentIssue"] = None
+            debug_log(f"Removed stale issue {key} (>24h, no work)",
+                      category="session-start", enabled=cfg.get("debugLog", False))
+
         # Always sync autonomy/accuracy from config (may have changed via /jira-setup)
         existing["autonomyLevel"] = cfg.get("autonomyLevel", "C")
         existing["accuracy"] = cfg.get("accuracy", 5)
@@ -1347,7 +1382,12 @@ def build_worklog(root: str, issue_key: str) -> dict:
         lang = get_log_language(root)
         summary = "עבודה על המשימה" if lang == "Hebrew" else "Work on task"
 
-    return {
+    capped = False
+    if total_seconds > MAX_WORKLOG_SECONDS:
+        total_seconds = MAX_WORKLOG_SECONDS
+        capped = True
+
+    result = {
         "issueKey": issue_key,
         "seconds": total_seconds,
         "summary": summary,
@@ -1357,6 +1397,9 @@ def build_worklog(root: str, issue_key: str) -> dict:
             "activityCount": total_activities,
         },
     }
+    if capped:
+        result["capped"] = True
+    return result
 
 
 
@@ -1463,28 +1506,11 @@ def cmd_session_end(args):
         raw_seconds = worklog["seconds"]
 
         if raw_seconds <= 0:
-            # Fallback to wallclock only when there's evidence of real activity.
-            # Buffer has already been drained above, so check work chunks.
-            # Without this guard, auto-detected branch issues with no actual work
-            # would report the entire elapsed wall time (e.g. 42 hours).
-            has_chunks = any(
-                c.get("issueKey") == issue_key
-                for c in session.get("workChunks", [])
+            debug_log(
+                f"issue={issue_key} skipped — no tracked activity (build_worklog returned 0s)",
+                category="session-end", enabled=debug,
             )
-            start = issue_data.get("startTime", 0)
-            if start > 0 and has_chunks:
-                raw_seconds = int(time.time()) - start
-                debug_log(
-                    f"issue={issue_key} using wallclock fallback raw={raw_seconds}s",
-                    category="session-end", enabled=debug,
-                )
-            if raw_seconds <= 0:
-                debug_log(
-                    f"issue={issue_key} skipped — no activity and no wallclock fallback "
-                    f"(has_chunks={has_chunks} start={start})",
-                    category="session-end", enabled=debug,
-                )
-                continue
+            continue
 
         rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
 
