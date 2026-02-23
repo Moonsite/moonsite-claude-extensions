@@ -425,6 +425,7 @@ def main():
         "auto-create-issue": cmd_auto_create_issue,
         "suggest-parent": cmd_suggest_parent,
         "build-worklog": cmd_build_worklog,
+        "build-unattributed": cmd_build_unattributed,
         "debug-log": cmd_debug_log,
         # REST API commands (no curl dependency)
         "create-issue": cmd_create_issue,
@@ -1523,6 +1524,21 @@ def cmd_build_worklog(args):
         print("{}", file=sys.stderr)
         return
     result = build_worklog(root, issue_key)
+    result["logLanguage"] = get_log_language(root)
+    print(json.dumps(result))
+
+
+def cmd_build_unattributed(args):
+    """Build worklog summary from unattributed (null-issueKey) work chunks.
+
+    Usage: jira_core.py build-unattributed <root>
+    """
+    root = args[0] if args else "."
+    session = load_session(root)
+    if not session:
+        print("{}")
+        return
+    result = _build_unattributed_worklog(session)
     result["logLanguage"] = get_log_language(root)
     print(json.dumps(result))
 

@@ -55,6 +55,8 @@ from jira_core import (
     _log_api_call,
     _enrich_summary_via_ai,
     _maybe_enrich_worklog_summary,
+    _build_unattributed_worklog,
+    cmd_build_unattributed,
     MAX_WORKLOG_SECONDS,
     STALE_ISSUE_SECONDS,
 )
@@ -2954,3 +2956,76 @@ class TestApiLoggingIntegration:
             )
         mock_log.assert_called_once()
         assert mock_log.call_args[0][1] == "/v1/messages"
+
+
+class TestCmdBuildUnattributed:
+    """Tests for the build-unattributed CLI command."""
+
+    def test_no_session_prints_empty_json(self, tmp_path, capsys):
+        """No session file → prints '{}'."""
+        cmd_build_unattributed([str(tmp_path)])
+        out = capsys.readouterr().out.strip()
+        assert out == "{}"
+
+    def test_session_with_null_chunks_returns_summary(self, tmp_path, capsys):
+        """Session with null-issueKey chunks → returns seconds/summary/rawFacts/logLanguage."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({"logLanguage": "Hebrew"}))
+        now = int(time.time())
+        session = {
+            "currentIssue": None,
+            "activeIssues": {},
+            "workChunks": [
+                {
+                    "issueKey": None,
+                    "startTime": now - 600,
+                    "endTime": now,
+                    "activities": [{"timestamp": now, "tool": "Edit", "type": "file_edit"}],
+                    "filesChanged": ["src/app.ts"],
+                    "idleGaps": [],
+                },
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_build_unattributed([str(tmp_path)])
+        out = capsys.readouterr().out.strip()
+        result = json.loads(out)
+        assert result["seconds"] == 600
+        assert "app.ts" in result["summary"]
+        assert "files" in result["rawFacts"]
+        assert result["logLanguage"] == "Hebrew"
+
+    def test_session_with_no_null_chunks_returns_zero(self, tmp_path, capsys):
+        """All chunks attributed → returns seconds: 0."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / CONFIG_NAME).write_text(json.dumps({}))
+        now = int(time.time())
+        session = {
+            "currentIssue": "TEST-1",
+            "activeIssues": {"TEST-1": {"startTime": now - 300, "totalSeconds": 0}},
+            "workChunks": [
+                {
+                    "issueKey": "TEST-1",
+                    "startTime": now - 300,
+                    "endTime": now,
+                    "activities": [],
+                    "filesChanged": ["foo.py"],
+                    "idleGaps": [],
+                },
+            ],
+        }
+        (claude_dir / SESSION_NAME).write_text(json.dumps(session))
+        cmd_build_unattributed([str(tmp_path)])
+        out = capsys.readouterr().out.strip()
+        result = json.loads(out)
+        assert result["seconds"] == 0
+
+    def test_registered_in_cli_dispatcher(self):
+        """build-unattributed is accessible via the main() dispatcher."""
+        import jira_core
+        # Trigger main with the command to verify it's registered
+        with patch.object(sys, "argv", ["jira_core.py", "build-unattributed", "/nonexistent"]):
+            # Should not raise "Unknown command"
+            jira_core.main()

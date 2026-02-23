@@ -13,7 +13,50 @@ You are stopping work on the current Jira task and logging time with a worklog a
 1. **Read session and config**:
    - Read `<project-root>/.claude/jira-session.json`
    - Read `<project-root>/.claude/jira-autopilot.json` for config (timeRounding, accuracy, autonomyLevel)
-   - If session doesn't exist or `currentIssue` is null, tell the user "No active task. Use /jira-start to begin tracking."
+   - If session doesn't exist → bail: "No session found. Use /jira-start to begin tracking."
+   - If `currentIssue` is set → proceed to step 2 (existing flow).
+   - If `currentIssue` is null → check for unattributed work (step 1b).
+
+### Step 1b — Unattributed work flow
+
+Run the unattributed worklog builder:
+```bash
+python3 <plugin-root>/hooks-handlers/jira_core.py build-unattributed "<project-root>"
+```
+This returns JSON: `{ "seconds": N, "summary": "...", "rawFacts": {...}, "chunkCount": N, "logLanguage": "..." }`
+
+- If `seconds == 0` → bail: "No active task and no captured work. Use /jira-start to begin tracking."
+- If `seconds > 0` → present options based on autonomy level:
+
+**Autonomy C** (default):
+```
+[jira-autopilot] No active issue, but <formatted_time> of work was captured:
+  Files: <file list from rawFacts>
+
+  1. Create new issue and log time  → enter /jira-start create flow, then post worklog
+  2. Log to existing issue          → ask for issue key, post worklog
+  3. Keep for later (/jira-approve) → save as deferred pendingWorklog
+  4. Drop entirely                  → discard
+```
+
+Handle each choice:
+- **1. Create new issue** — Run the `/jira-start` create flow to create an issue, then post the unattributed worklog to the newly created issue using step 6.
+- **2. Log to existing issue** — Ask the user for an issue key, then post the worklog to that issue using step 6.
+- **3. Keep for later** — Add to `pendingWorklogs` in session state with `status: "deferred"` and `issueKey: null`. The user can review later with `/jira-approve`.
+- **4. Drop entirely** — Discard the unattributed work chunks and exit.
+
+**Autonomy B**: Show summary, auto-create issue via:
+```bash
+python3 <plugin-root>/hooks-handlers/jira_core.py auto-create-issue "<project-root>" "<summary>"
+```
+Then post the worklog to the created issue.
+
+**Autonomy A**: Silent — auto-create issue, log time, print one-liner:
+```
+[jira-autopilot] Auto-created <KEY> and logged <time>
+```
+
+After handling the unattributed work, skip to step 8 (update session state) — steps 2-5 are only for the attributed (currentIssue) flow.
 
 2. **Build worklog** — Run the worklog builder to gather raw facts:
    ```bash
