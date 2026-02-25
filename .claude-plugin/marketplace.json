@@ -14,7 +14,7 @@
       "name": "jira-autopilot",
       "source": "./plugins/jira-autopilot",
       "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
-      "version": "3.17.0",
+      "version": "3.19.0",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -28,6 +28,50 @@
         "productivity",
         "autopilot",
         "autonomous"
+      ]
+    },
+    {
+      "name": "doc-authoring",
+      "source": "./plugins/doc-authoring",
+      "description": "Author documentation — specs, guides, reports, plans — with Figma/Playwright images, HTML generation, and index maintenance",
+      "version": "1.0.0",
+      "author": {
+        "name": "Boris Sigalov"
+      },
+      "category": "documentation",
+      "homepage": "https://github.com/Moonsite/moonsite-claude-extensions",
+      "keywords": [
+        "documentation",
+        "specs",
+        "guides",
+        "reports",
+        "authoring",
+        "figma",
+        "playwright",
+        "hebrew",
+        "rtl"
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "moonsite-spec",
+      "source": "./skills/moonsite-spec",
+      "description": "Generate technical specification documents in Moonsite format from requirements, source code, and Figma designs",
+      "version": "1.0.0",
+      "author": {
+        "name": "Boris Sigalov"
+      },
+      "category": "documentation",
+      "keywords": [
+        "spec",
+        "specification",
+        "documentation",
+        "figma",
+        "hebrew",
+        "rtl",
+        "docx",
+        "umbraco"
       ]
     }
   ]

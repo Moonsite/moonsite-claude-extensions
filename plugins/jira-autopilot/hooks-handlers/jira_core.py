@@ -726,11 +726,94 @@ def cmd_auto_create_issue(args):
         print(json.dumps(result))
 
 
+def _auto_setup_from_global(root: str) -> dict:
+    """Auto-create project config from global credentials if available.
+
+    Detects project key from git history and creates a minimal
+    .claude/jira-autopilot.json so the plugin works in any project.
+    Returns the new config dict, or {} if auto-setup is not possible.
+    """
+    gcfg = load_global_config()
+    if not gcfg.get("apiToken") or not gcfg.get("baseUrl"):
+        return {}
+
+    # Detect project key from git commits/branches
+    project_key = _detect_project_key_from_git(root)
+    if not project_key:
+        debug_log("Auto-setup: no project key detected from git",
+                  category="session-start")
+        return {}
+
+    cfg = {
+        "projectKey": project_key,
+        "cloudId": gcfg.get("cloudId", ""),
+        "enabled": True,
+        "autonomyLevel": "A",
+        "accuracy": 10,
+        "branchPattern": f"^(?:feature|fix|hotfix|chore|docs)/({re.escape(project_key)}-\\d+)",
+        "commitPattern": f"{re.escape(project_key)}-\\d+:",
+        "timeRounding": 1,
+        "idleThreshold": 5,
+        "autoCreate": True,
+        "defaultLabels": ["jira-autopilot"],
+        "logLanguage": gcfg.get("logLanguage", "English"),
+    }
+
+    config_path = os.path.join(root, ".claude", CONFIG_NAME)
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    # Also create local config symlink/copy from global creds
+    local_path = os.path.join(root, ".claude", LOCAL_CONFIG_NAME)
+    if not os.path.exists(local_path):
+        local_cfg = {
+            "email": gcfg.get("email", ""),
+            "apiToken": gcfg.get("apiToken", ""),
+            "baseUrl": gcfg.get("baseUrl", ""),
+            "accountId": gcfg.get("accountId", ""),
+        }
+        with open(local_path, "w") as f:
+            json.dump(local_cfg, f, indent=2)
+
+    debug_log(f"Auto-setup: created config for project {project_key}",
+              category="session-start")
+    return cfg
+
+
+def _detect_project_key_from_git(root: str) -> str | None:
+    """Detect Jira project key from git commit messages and branch names."""
+    try:
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-100"],
+            capture_output=True, text=True, cwd=root, timeout=5,
+        ).stdout
+        branches = subprocess.run(
+            ["git", "branch", "-a"],
+            capture_output=True, text=True, cwd=root, timeout=5,
+        ).stdout
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+
+    text = log + "\n" + branches
+    keys = re.findall(r'([A-Z][A-Z0-9]+-)\d+', text)
+    if not keys:
+        return None
+    counted = Counter(keys)
+    most_common = counted.most_common(1)[0][0].rstrip("-")
+    return most_common
+
+
 def cmd_session_start(args):
     root = args[0] if args else "."
     _migrate_old_configs(root)
 
     cfg = load_config(root)
+
+    # Auto-setup: if no project config exists, try creating one from global creds
+    if not cfg:
+        cfg = _auto_setup_from_global(root)
+
     if not cfg.get("enabled", True):
         debug_log("Plugin disabled via config — skipping session start",
                   category="session-start", enabled=cfg.get("debugLog", False))
