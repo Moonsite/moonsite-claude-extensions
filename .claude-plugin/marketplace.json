@@ -31,9 +31,9 @@
       ]
     },
     {
-      "name": "doc-authoring",
-      "source": "./plugins/doc-authoring",
-      "description": "Author documentation — specs, guides, reports, plans — with Figma/Playwright images, HTML generation, and index maintenance",
+      "name": "md-html-docs",
+      "source": "./plugins/md-html-docs",
+      "description": "Proactively generates HTML from markdown in docs/ folders, captures images from Figma/Playwright, and maintains doc indexes",
       "version": "1.0.0",
       "author": {
         "name": "Boris Sigalov"
@@ -57,7 +57,7 @@
     {
       "name": "moonsite-spec",
       "source": "./skills/moonsite-spec",
-      "description": "Generate technical specification documents in Moonsite format from requirements, source code, and Figma designs",
+      "description": "Generate Word document (.docx) technical specifications in Moonsite corporate style from requirements, code, and Figma designs",
       "version": "1.0.0",
       "author": {
         "name": "Boris Sigalov"
