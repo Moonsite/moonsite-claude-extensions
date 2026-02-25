@@ -8,15 +8,14 @@ A collection of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) ex
 
 | Plugin | Description | Version |
 |--------|-------------|---------|
-| [jira-autopilot](plugins/jira-autopilot/) | Autonomous Jira work tracking, issue creation, and time logging | 3.0.0 |
+| [jira-autopilot](plugins/jira-autopilot/) | Autonomous Jira work tracking, issue creation, and time logging | 3.19.0 |
+| [md-html-docs](plugins/md-html-docs/) | Auto-generates HTML from markdown in `docs/` folders, with Figma/Playwright image capture and index maintenance | 1.0.0 |
 
 ### Skills
 
-_Coming soon._
-
-### Hooks
-
-_Coming soon._
+| Skill | Description | Version |
+|-------|-------------|---------|
+| [moonsite-spec](skills/moonsite-spec/) | Generate Word (.docx) technical specifications in Moonsite corporate style | 1.0.0 |
 
 ---
 
@@ -127,6 +126,53 @@ Enable in `~/.claude/settings.json`:
 
 ---
 
+## md-html-docs
+
+Automatically generates HTML whenever you create or edit markdown files in your project's `docs/` folder. Includes a skill for manual doc authoring with Figma/Playwright image capture.
+
+### Features
+
+- **PostToolUse hook** that fires on every `Write`/`Edit` of `docs/**/*.md`
+- **First-run opt-in** — asks before enabling auto-generation
+- **Per-project config** stored in `.claude/md-html-docs.json`
+- **Doc type routing** — specs, guides, reports each use their own converter
+- **Skill with templates** for specs, guides, reports, and plans
+
+### Installation
+
+```bash
+git clone https://github.com/Moonsite/moonsite-claude-extensions.git ~/.claude/plugins/local/md-html-docs
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/md-html-docs enable` | Enable auto HTML generation for this project |
+| `/md-html-docs disable` | Disable auto HTML generation for this project |
+| `/md-html-docs status` | Show current configuration |
+
+---
+
+## moonsite-spec
+
+Generate Word document (.docx) technical specifications in Moonsite corporate style from requirements, source code, and Figma designs.
+
+### Features
+
+- **Moonsite template** with corporate formatting
+- **Hebrew RTL** support
+- **Figma integration** for capturing UI designs
+- **Structured workflow** — gather inputs, analyze, generate spec
+
+### Installation
+
+```bash
+cp -r moonsite-claude-extensions/skills/moonsite-spec ~/.claude/skills/
+```
+
+---
+
 ## Repository Structure
 
 ```
@@ -134,8 +180,10 @@ moonsite-claude-extensions/
 ├── .claude-plugin/
 │   └── marketplace.json         # Marketplace manifest
 ├── plugins/
-│   └── jira-autopilot/          # Jira autopilot plugin
-├── skills/                      # (future skills)
+│   ├── jira-autopilot/          # Jira autopilot plugin
+│   └── md-html-docs/            # Markdown-to-HTML docs plugin
+├── skills/
+│   └── moonsite-spec/           # Moonsite spec generator skill
 ├── hooks/                       # (future standalone hooks)
 ├── docs/
 │   └── plans/                   # Design docs and test plans
