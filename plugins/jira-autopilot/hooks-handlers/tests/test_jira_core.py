@@ -55,6 +55,8 @@ from jira_core import (
     _log_api_call,
     _enrich_summary_via_ai,
     _maybe_enrich_worklog_summary,
+    jira_get_projects,
+    _auto_setup_from_global,
     MAX_WORKLOG_SECONDS,
     STALE_ISSUE_SECONDS,
 )
@@ -2954,3 +2956,154 @@ class TestApiLoggingIntegration:
             )
         mock_log.assert_called_once()
         assert mock_log.call_args[0][1] == "/v1/messages"
+
+
+# ── Tests for jira_get_projects ──────────────────────────────────────────
+
+
+class TestJiraGetProjects:
+    def test_returns_projects_on_success(self, tmp_path):
+        """Successful API call returns list of {key, name} dicts."""
+        # Set up local config with creds
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        local_cfg = {"email": "a@b.com", "apiToken": "tok", "baseUrl": "https://x.atlassian.net"}
+        (claude_dir / "jira-autopilot.local.json").write_text(json.dumps(local_cfg))
+
+        api_response = json.dumps({
+            "values": [
+                {"key": "PROJ", "name": "My Project"},
+                {"key": "DEV", "name": "Dev Team"},
+            ]
+        }).encode()
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 200
+        mock_resp.read.return_value = api_response
+
+        with patch("jira_core.urllib.request.urlopen", return_value=mock_resp), \
+             patch("jira_core._log_api_call"):
+            result = jira_get_projects(str(tmp_path))
+
+        assert result == [{"key": "PROJ", "name": "My Project"}, {"key": "DEV", "name": "Dev Team"}]
+
+    def test_returns_empty_on_missing_creds(self, tmp_path):
+        """No creds → empty list, no API call."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "jira-autopilot.local.json").write_text("{}")
+        fake_global = tmp_path / "no-global.json"
+        with patch("jira_core.GLOBAL_CONFIG_PATH", fake_global):
+            result = jira_get_projects(str(tmp_path))
+        assert result == []
+
+    def test_returns_empty_on_http_error(self, tmp_path):
+        """HTTP error → empty list."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        local_cfg = {"email": "a@b.com", "apiToken": "tok", "baseUrl": "https://x.atlassian.net"}
+        (claude_dir / "jira-autopilot.local.json").write_text(json.dumps(local_cfg))
+
+        with patch("jira_core.urllib.request.urlopen",
+                   side_effect=urllib.error.HTTPError(
+                       "url", 403, "Forbidden", {}, None)), \
+             patch("jira_core._log_api_call"), \
+             patch("jira_core.debug_log"):
+            result = jira_get_projects(str(tmp_path))
+
+        assert result == []
+
+    def test_returns_empty_on_network_error(self, tmp_path):
+        """Network timeout → empty list."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        local_cfg = {"email": "a@b.com", "apiToken": "tok", "baseUrl": "https://x.atlassian.net"}
+        (claude_dir / "jira-autopilot.local.json").write_text(json.dumps(local_cfg))
+
+        with patch("jira_core.urllib.request.urlopen",
+                   side_effect=TimeoutError("timed out")), \
+             patch("jira_core._log_api_call"), \
+             patch("jira_core.debug_log"):
+            result = jira_get_projects(str(tmp_path))
+
+        assert result == []
+
+
+# ── Tests for _auto_setup_from_global with project validation ────────────
+
+
+class TestAutoSetupValidation:
+    def _setup_global_config(self, tmp_path):
+        """Write a global config so auto-setup proceeds."""
+        gcfg = {
+            "email": "a@b.com",
+            "apiToken": "tok",
+            "baseUrl": "https://x.atlassian.net",
+            "cloudId": "cloud123",
+            "accountId": "acc456",
+        }
+        global_path = tmp_path / "global.json"
+        global_path.write_text(json.dumps(gcfg))
+        return global_path
+
+    def test_validated_key_used(self, tmp_path):
+        """Git-detected key that exists in Jira → used in config."""
+        global_path = self._setup_global_config(tmp_path)
+        root = str(tmp_path / "repo")
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+
+        with patch("jira_core.GLOBAL_CONFIG_PATH", global_path), \
+             patch("jira_core._detect_project_key_from_git", return_value="PROJ"), \
+             patch("jira_core.jira_get_projects",
+                   return_value=[{"key": "PROJ", "name": "My Project"}, {"key": "OTHER", "name": "Other"}]), \
+             patch("jira_core.debug_log"):
+            cfg = _auto_setup_from_global(root)
+
+        assert cfg["projectKey"] == "PROJ"
+        assert "PROJ" in cfg["branchPattern"]
+
+    def test_unvalidated_key_becomes_empty(self, tmp_path):
+        """Git-detected key NOT in Jira → empty projectKey."""
+        global_path = self._setup_global_config(tmp_path)
+        root = str(tmp_path / "repo")
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+
+        with patch("jira_core.GLOBAL_CONFIG_PATH", global_path), \
+             patch("jira_core._detect_project_key_from_git", return_value="PHANTOM"), \
+             patch("jira_core.jira_get_projects",
+                   return_value=[{"key": "REAL", "name": "Real Project"}]), \
+             patch("jira_core.debug_log"):
+            cfg = _auto_setup_from_global(root)
+
+        assert cfg["projectKey"] == ""
+        assert cfg["branchPattern"] == ""
+
+    def test_api_failure_falls_back_to_empty(self, tmp_path):
+        """Jira API returns [] (failure) → empty projectKey, not phantom key."""
+        global_path = self._setup_global_config(tmp_path)
+        root = str(tmp_path / "repo")
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+
+        with patch("jira_core.GLOBAL_CONFIG_PATH", global_path), \
+             patch("jira_core._detect_project_key_from_git", return_value="PHANTOM"), \
+             patch("jira_core.jira_get_projects", return_value=[]), \
+             patch("jira_core.debug_log"):
+            cfg = _auto_setup_from_global(root)
+
+        assert cfg["projectKey"] == ""
+
+    def test_no_git_key_skips_validation(self, tmp_path):
+        """No git-detected key → empty projectKey without calling API."""
+        global_path = self._setup_global_config(tmp_path)
+        root = str(tmp_path / "repo")
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+
+        with patch("jira_core.GLOBAL_CONFIG_PATH", global_path), \
+             patch("jira_core._detect_project_key_from_git", return_value=None), \
+             patch("jira_core.jira_get_projects") as mock_get, \
+             patch("jira_core.debug_log"):
+            cfg = _auto_setup_from_global(root)
+
+        assert cfg["projectKey"] == ""
+        mock_get.assert_not_called()

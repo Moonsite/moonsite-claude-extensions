@@ -430,6 +430,7 @@ def main():
         "create-issue": cmd_create_issue,
         "get-issue": cmd_get_issue,
         "add-worklog": cmd_add_worklog,
+        "get-projects": cmd_get_projects,
     }
     fn = commands.get(cmd)
     if not fn:
@@ -738,7 +739,19 @@ def _auto_setup_from_global(root: str) -> dict:
         return {}
 
     # Detect project key from git commits/branches (may be None for non-git dirs)
-    project_key = _detect_project_key_from_git(root) or ""
+    detected_key = _detect_project_key_from_git(root) or ""
+
+    # Validate detected key against real Jira projects
+    project_key = ""
+    if detected_key:
+        real_projects = jira_get_projects(root)
+        real_keys = {p["key"] for p in real_projects}
+        if detected_key in real_keys:
+            project_key = detected_key
+        else:
+            debug_log(f"Auto-setup: git-detected key '{detected_key}' not found in Jira "
+                      f"(available: {', '.join(sorted(real_keys)) or 'none'})",
+                      category="session-start")
 
     cfg = {
         "projectKey": project_key,
@@ -798,6 +811,52 @@ def _detect_project_key_from_git(root: str) -> str | None:
     counted = Counter(keys)
     most_common = counted.most_common(1)[0][0].rstrip("-")
     return most_common
+
+
+def jira_get_projects(root: str) -> list[dict]:
+    """Fetch accessible Jira projects from the Jira Cloud API.
+
+    Returns list of {key, name} dicts, or [] on failure.
+    """
+    base_url = get_cred(root, "baseUrl")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+    if not base_url or not email or not api_token:
+        return []
+
+    url = f"{base_url.rstrip('/')}/rest/api/3/project/search?maxResults=50&orderBy=key"
+    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Basic {auth}")
+    req.add_header("Accept", "application/json")
+    api_path = "/rest/api/3/project/search"
+    start_ts = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            elapsed_ms = int((time.time() - start_ts) * 1000)
+            _log_api_call("GET", api_path, resp.status, elapsed_ms)
+            data = json.loads(resp.read().decode())
+            values = data.get("values", [])
+            return [{"key": p["key"], "name": p.get("name", "")} for p in values]
+    except urllib.error.HTTPError as e:
+        elapsed_ms = int((time.time() - start_ts) * 1000)
+        _log_api_call("GET", api_path, e.code, elapsed_ms, f"error={e.reason}")
+        debug_log(f"jira_get_projects HTTP error status={e.code} reason={e.reason}",
+                  category="jira-api")
+        return []
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_ts) * 1000)
+        _log_api_call("GET", api_path, 0, elapsed_ms, f"error={type(e).__name__}")
+        debug_log(f"jira_get_projects error={type(e).__name__}: {e}",
+                  category="jira-api")
+        return []
+
+
+def cmd_get_projects(args):
+    """CLI command: fetch and print accessible Jira projects as JSON."""
+    root = args[0] if args else "."
+    projects = jira_get_projects(root)
+    print(json.dumps(projects))
 
 
 def cmd_session_start(args):

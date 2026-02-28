@@ -10,11 +10,13 @@ You are configuring the jira-autopilot plugin for this project.
 
 ## Steps
 
-1. **Auto-detect project key from git history** — Before asking the user, try to detect the project key automatically:
-   - Run: `bash plugins/jira-autopilot/hooks-handlers/helpers.sh detect_project_key` (or inline the logic: scan `git log --oneline -100` and `git branch -a` for patterns matching `[A-Z]+-\d+`, extract the most common prefixes)
-   - If keys are detected, present them as AskUserQuestion options: "What's your Jira project key?" with detected keys as options. The user can pick one or use the built-in "Other" option to type a different key. Do NOT add a "Type a different key" option — AskUserQuestion already provides "Other" automatically.
-   - If no keys are detected, just ask: "What's your Jira project key? (the prefix before the dash in issue numbers, e.g. PROJ from PROJ-123)"
+1. **Select project key from Jira** — After credentials are available (step 2-4 or reused from global), fetch real projects and let the user pick:
+   - Run: `python3 plugins/jira-autopilot/hooks-handlers/jira_core.py get-projects <project-root>` to get a JSON array of `{key, name}` from Jira.
+   - Also detect keys from git history (scan `git log --oneline -100` and `git branch -a` for patterns matching `[A-Z]+-\d+`).
+   - Present real Jira projects as AskUserQuestion options: "Which Jira project should this repo track?" — sort projects so that any matching git-detected keys appear first (most relevant). Show as "KEY — Project Name". Include a "Skip for now" option (sets empty projectKey — plugin monitors work without attribution). The user can also use the built-in "Other" option to type a different key.
+   - If the API call returns no projects (network error, permissions), fall back to asking: "What's your Jira project key? (the prefix before the dash in issue numbers, e.g. PROJ from PROJ-123)" — and add a "Skip for now" option.
    - If the user selects "Other" and types a key, use that value directly. Do NOT ask a follow-up question.
+   - If the user selects "Skip for now", set `projectKey` to `""` in config.
 
 2. **Check for saved global credentials** — Before asking for URL and credentials:
    - Check if `~/.claude/jira-autopilot.global.json` exists and contains `baseUrl`, `email`, `apiToken`.
