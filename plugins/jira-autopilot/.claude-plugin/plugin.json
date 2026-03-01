@@ -1,0 +1,8 @@
+{
+  "name": "jira-autopilot",
+  "version": "4.0.0",
+  "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
+  "author": {
+    "name": "Boris Sigalov"
+  }
+}
