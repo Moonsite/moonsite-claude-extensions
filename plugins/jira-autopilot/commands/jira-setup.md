@@ -4,168 +4,265 @@ description: Configure Jira tracking for this project
 allowed-tools: Bash, Write, Edit, Read, AskUserQuestion, Glob
 ---
 
-# Jira Autopilot Setup
+# /jira-setup — Configure Jira Tracking
 
-You are configuring the jira-autopilot plugin for this project.
+You are the Jira Autopilot setup wizard. Walk the user through configuring their Jira connection step by step. Be concise but friendly.
 
-## Steps
+**IMPORTANT:** Use `AskUserQuestion` for every user-facing question. Never assume answers.
 
-1. **Select project key from Jira** — After credentials are available (step 2-4 or reused from global), fetch real projects and let the user pick:
-   - Run: `python3 plugins/jira-autopilot/hooks-handlers/jira_core.py get-projects <project-root>` to get a JSON array of `{key, name}` from Jira.
-   - Also detect keys from git history (scan `git log --oneline -100` and `git branch -a` for patterns matching `[A-Z]+-\d+`).
-   - Present real Jira projects as AskUserQuestion options: "Which Jira project should this repo track?" — sort projects so that any matching git-detected keys appear first (most relevant). Show as "KEY — Project Name". Include a "Skip for now" option (sets empty projectKey — plugin monitors work without attribution). The user can also use the built-in "Other" option to type a different key.
-   - If the API call returns no projects (network error, permissions), fall back to asking: "What's your Jira project key? (the prefix before the dash in issue numbers, e.g. PROJ from PROJ-123)" — and add a "Skip for now" option.
-   - If the user selects "Other" and types a key, use that value directly. Do NOT ask a follow-up question.
-   - If the user selects "Skip for now", set `projectKey` to `""` in config.
+## Path Resolution
 
-2. **Check for saved global credentials** — Before asking for URL and credentials:
-   - Check if `~/.claude/jira-autopilot.global.json` exists and contains `baseUrl`, `email`, `apiToken`.
-   - If it does, show the saved baseUrl and email (NOT the token) and ask: "Found saved Jira credentials for **user@company.com** at **https://company.atlassian.net**. Use these? (yes/no)"
-   - If the user says yes, skip steps 3-4 and reuse the saved values.
-   - If the user says no, or the file doesn't exist, continue with steps 3-4 below.
+Set `PLUGIN_ROOT` to the directory containing this plugin. All Python CLI calls use:
 
-3. **Ask for Jira base URL** — Ask the user in plain text (NOT using AskUserQuestion): "What's your Jira base URL? (e.g. https://yourcompany.atlassian.net)". Let them type it directly. Do NOT present options or menus — just wait for them to type the URL. Validate it looks like a URL starting with `https://`.
-   - Auto-fetch Cloud ID: run `curl -s <baseUrl>/_edge/tenant_info` and extract `cloudId` from JSON response using `python3 -c "import json,sys; print(json.load(sys.stdin).get('cloudId',''))"`.
-   - If fetch fails, ask the user for cloudId manually.
+```
+python3 "$PLUGIN_ROOT/hooks-handlers/jira_core.py" <command> <args>
+```
 
-4. **Ask for credentials** (email + API token):
-   - Tell the user: "You'll need your Atlassian email and an API token. Create one at: https://id.atlassian.com/manage-profile/security/api-tokens"
-   - Ask for email address
-   - Ask for API token
+where `PLUGIN_ROOT` is resolved from `$CLAUDE_PLUGIN_ROOT` if available, or by finding the `jira_core.py` file relative to the commands directory.
 
-5. **Test connectivity and cache accountId**: Run via Bash:
-   ```bash
-   curl -s -u "<email>:<token>" -H "Accept: application/json" "<baseUrl>/rest/api/3/myself"
-   ```
-   - If the response contains `accountId`, connection works. Extract `accountId` and `displayName` from the response.
-   - Show: "Connected as **<displayName>**"
-   - Cache the `accountId` — it will be saved to the local config in step 9 for auto-assigning issues.
-   - If the request fails or returns an error, show the error and ask the user to check their credentials. Do NOT proceed until connection works.
+Determine the project root:
+```bash
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+```
 
-6. **Autonomy level selection** — Explain and let the user choose:
-   ```
-   Autonomy Level — how much should jira-autopilot do on its own?
+---
 
-     C (Cautious) — default
-       Show summaries and ask before every action.
-       You approve issue creation, worklog posting, and time logging.
+## Step 1: Check for Saved Global Credentials
 
-     B (Balanced)
-       Show summaries, then auto-proceed after 10 seconds.
-       You see what's happening but don't need to approve each step.
-       Issues are created automatically when work intent is detected (with a notice).
+Read `~/.claude/jira-autopilot.global.json`. If it exists and contains `baseUrl`, `email`, and `apiToken`:
 
-     A (Autonomous)
-       Act silently. Create issues, log time, post worklogs automatically.
-       You'll see a one-line confirmation after each action.
-       Issues are created immediately when work intent is detected (confidence ≥ 0.65).
-   ```
-   Default: **C**. Let the user pick C, B, or A.
-   > **Note:** If you choose A or B, `autoCreate` will be set to `true` — issues are created automatically when work intent is detected.
+- Show the saved email and URL (NOT the token).
+- Ask: "Found saved Jira credentials for **{email}** at **{baseUrl}**. Use these?"
+- If yes: reuse saved values, skip Steps 2-3.
+- If no: continue to Steps 2-3 for fresh entry.
 
-7. **Accuracy parameter selection** — Explain and let the user choose (1-10):
-   ```
-   Accuracy (1-10) — how precisely should time be tracked?
+If no global file exists, continue to Step 2.
 
-     Low (1-3): Coarse tracking. 30-min rounding, 30-min idle threshold.
-       Good for: rough time estimates, low overhead.
-       Produces ~3-4 issues per day, combines small tasks.
+## Step 2: Ask for Jira Base URL
 
-     Medium (4-7): Balanced tracking. 15-min rounding, 15-min idle threshold.
-       Good for: most teams, standard Jira workflows.
-       Produces ~5-8 issues per day.
+Ask the user for their Jira instance URL (e.g. `https://company.atlassian.net`).
 
-     High (8-10): Fine-grained tracking. 1-min rounding, 5-min idle threshold.
-       Good for: billing, auditing, detailed work attribution.
-       Produces 10+ issues per day, never combines tasks.
-   ```
-   Default: **5**. Let the user pick a number 1-10.
+- Validate it starts with `https://`
+- Auto-fetch Cloud ID:
 
-8. **Worklog language** — Ask which language worklog descriptions should be written in:
-   ```
-   What language should worklog descriptions be written in?
-     1. English (default)
-     2. Hebrew (עברית)
-     3. Russian (Русский)
-     4. Other — type a language name
-   ```
-   - Default: **English**.
-   - Save to project config as `"logLanguage": "<language>"`.
-   - Also ask: "Set this as your global default for all projects?" — if yes, save `logLanguage` to `~/.claude/jira-autopilot.global.json` too.
+```bash
+curl -s "${BASE_URL}/_edge/tenant_info" | python3 -c "import json,sys; print(json.load(sys.stdin).get('cloudId',''))"
+```
 
-9. **Additional settings** — Show defaults and let the user override:
-   - Branch pattern: `^(?:feature|fix|hotfix|chore|docs)/({key}-\\d+)` (where `{key}` = project key)
-   - Commit pattern: `{key}-\\d+:`
-   - Time rounding: derived from accuracy (low=30, medium=15, high=1), but can override
-   - Idle threshold: derived from accuracy (low=30, medium=15, high=5), but can override (in minutes)
-   - Debug logging: **enabled** (default true during development — logs to `~/.claude/jira-autopilot-debug.log`)
-   - Auto-create issues: true if autonomy A or B, false for C (ask first before creating)
-   - Ask if these defaults are OK or if the user wants to change any.
+- If Cloud ID fetch fails, ask the user to provide it manually (or skip — it can be empty).
+- Store `baseUrl` and `cloudId`.
 
-10. **Write config files**:
-   - `<project-root>/.claude/jira-autopilot.json` (committed to repo):
-     ```json
-     {
-       "projectKey": "<KEY>",
-       "cloudId": "<CLOUD_ID>",
-       "enabled": true,
-       "autonomyLevel": "<C|B|A>",
-       "accuracy": <1-10>,
-       "debugLog": true,
-       "branchPattern": "^(?:feature|fix|hotfix|chore|docs)/({key}-\\d+)",
-       "commitPattern": "{key}-\\d+:",
-       "timeRounding": <15>,
-       "idleThreshold": <15>,
-       "autoCreate": <true if autonomyLevel is A or B, false otherwise>,
-       "logLanguage": "<language>",
-       "defaultLabels": ["jira-autopilot"],
-       "defaultComponent": null,
-       "defaultFixVersion": null,
-       "componentMap": {}
-     }
-     ```
-   - `<project-root>/.claude/jira-autopilot.local.json` (gitignored, contains secrets):
-     ```json
-     {
-       "email": "<EMAIL>",
-       "apiToken": "<TOKEN>",
-       "baseUrl": "<BASE_URL>",
-       "accountId": "<ACCOUNT_ID>"
-     }
-     ```
+## Step 3: Ask for Credentials
 
-11. **Offer to save credentials globally**:
-    - Ask: "Save these credentials globally so you don't have to re-enter them for other projects? (yes/no)"
-    - If yes, write `~/.claude/jira-autopilot.global.json`:
-      ```json
-      {
-        "email": "<EMAIL>",
-        "apiToken": "<TOKEN>",
-        "baseUrl": "<BASE_URL>",
-        "cloudId": "<CLOUD_ID>",
-        "accountId": "<ACCOUNT_ID>"
-      }
-      ```
+Ask for:
+1. **Email address** — their Atlassian account email.
+2. **API token** — provide the link: `https://id.atlassian.com/manage-profile/security/api-tokens`
 
-12. **Update `.gitignore`** — ensure these lines exist:
-    ```
-    .claude/current-task.json
-    .claude/jira-session.json
-    .claude/jira-sessions/
-    .claude/jira-autopilot.local.json
-    .claude/jira-autopilot.declined
-    ```
+Tell the user: "Your API token will be stored locally and never committed to git."
 
-13. **Remove** `.claude/jira-autopilot.declined` if it exists.
+## Step 4: Test Connectivity
 
-14. **Confirm** setup is complete and show saved configuration summary, including:
-    - Project key
-    - Connected as (display name)
-    - Autonomy level (with brief description)
-    - Accuracy level (with time rounding and idle threshold)
-    - Debug logging status
+Test the connection:
 
-## Notes
-- If `.claude/jira-autopilot.json` already exists, show current values and ask what to change.
-- The `{key}` placeholder in patterns gets replaced with the actual project key at runtime.
-- NEVER commit or display the API token in output after initial setup.
+```bash
+python3 "$PLUGIN_ROOT/hooks-handlers/jira_core.py" test-connection "$PROJECT_ROOT" "$BASE_URL" "$EMAIL" "$API_TOKEN"
+```
+
+If no `test-connection` CLI command exists, test directly:
+
+```bash
+curl -s -u "$EMAIL:$API_TOKEN" "${BASE_URL}/rest/api/3/myself"
+```
+
+- Extract `accountId` and `displayName` from the response.
+- Show: "Connected as **{displayName}**"
+- If the test fails, show the error and ask the user to re-enter credentials. Do NOT proceed until connectivity is confirmed.
+
+## Step 5: Select Project Key
+
+Fetch available Jira projects:
+
+```bash
+python3 "$PLUGIN_ROOT/hooks-handlers/jira_core.py" get-projects "$PROJECT_ROOT"
+```
+
+Also detect keys from git history:
+
+```bash
+git log --oneline -100 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sed 's/-[0-9]*//' | sort -u
+git branch -a 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sed 's/-[0-9]*//' | sort -u
+```
+
+Present the options via `AskUserQuestion`:
+- Sort git-detected matches first (they are most likely relevant).
+- Format: "KEY — Project Name"
+- Include a "Skip for now" option (sets `projectKey` to empty string — monitoring mode).
+- Include an "Other" option for manual key entry.
+
+If the API returns no projects, fall back to text input with a "Skip for now" option.
+
+## Step 6: Autonomy Level
+
+Ask the user to choose their autonomy level via `AskUserQuestion`:
+
+- **C (Cautious)** — Default. Ask before every action (issue creation, worklog posting).
+- **B (Balanced)** — Show summaries, then auto-proceed. Enables `autoCreate: true`.
+- **A (Autonomous)** — Act silently. Enables `autoCreate: true`. Auto-creates at confidence >= 0.65.
+
+Default to C if the user is unsure.
+
+## Step 7: Accuracy (1-10)
+
+Ask for an accuracy level from 1 to 10 (default: 5):
+
+- **Low (1-3):** Coarser time entries, longer idle thresholds, fewer issues/day.
+- **Medium (4-7):** Balanced defaults.
+- **High (8-10):** Fine-grained entries, shorter idle thresholds, more issues/day.
+
+## Step 8: Worklog Language
+
+Ask the user to choose their worklog language via `AskUserQuestion`:
+
+- **English** (default)
+- **Hebrew**
+- **Russian**
+- **Other** (let the user type a custom language name)
+
+Offer to save this as the global default.
+
+## Step 9: Additional Settings (Optional)
+
+Show the defaults for these settings and ask if the user wants to override any:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `branchPattern` | `^(?:feature\|fix\|hotfix\|chore\|docs)/({key}-\\d+)` | Regex for extracting issue key from branch name |
+| `commitPattern` | `{key}-\\d+:` | Regex for detecting issue key in commits |
+| `timeRounding` | `15` | Minutes to round worklogs up to |
+| `idleThreshold` | `15` | Minutes of inactivity before splitting chunks |
+| `debugLog` | `true` | Enable debug logging |
+| `autoCreate` | `false` (C) / `true` (B/A) | Auto-create issues on work intent detection |
+
+If the user wants defaults, skip ahead. Otherwise, ask for each override individually.
+
+## Step 10: Write Config Files
+
+Write the project config:
+
+```bash
+python3 -c "
+import json
+config = {
+    'projectKey': '$PROJECT_KEY',
+    'cloudId': '$CLOUD_ID',
+    'enabled': True,
+    'autonomyLevel': '$AUTONOMY',
+    'accuracy': $ACCURACY,
+    'debugLog': True,
+    'branchPattern': '$BRANCH_PATTERN',
+    'commitPattern': '$COMMIT_PATTERN',
+    'timeRounding': $TIME_ROUNDING,
+    'idleThreshold': $IDLE_THRESHOLD,
+    'autoCreate': $AUTO_CREATE,
+    'logLanguage': '$LOG_LANGUAGE',
+    'defaultLabels': ['jira-autopilot'],
+    'defaultComponent': None,
+    'defaultFixVersion': None,
+    'componentMap': {},
+    'worklogInterval': 15
+}
+with open('$PROJECT_ROOT/.claude/jira-autopilot.json', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Project config saved.')
+"
+```
+
+Write the local credentials file:
+
+```bash
+python3 -c "
+import json
+local = {
+    'email': '$EMAIL',
+    'apiToken': '$API_TOKEN',
+    'baseUrl': '$BASE_URL',
+    'accountId': '$ACCOUNT_ID',
+    'anthropicApiKey': '',
+    'recentParents': []
+}
+with open('$PROJECT_ROOT/.claude/jira-autopilot.local.json', 'w') as f:
+    json.dump(local, f, indent=2)
+print('Local credentials saved.')
+"
+```
+
+## Step 11: Offer Global Save
+
+Ask: "Save these credentials globally for use in other projects?"
+
+If yes, write to `~/.claude/jira-autopilot.global.json`:
+
+```bash
+python3 -c "
+import json, os
+path = os.path.expanduser('~/.claude/jira-autopilot.global.json')
+os.makedirs(os.path.dirname(path), exist_ok=True)
+data = {
+    'email': '$EMAIL',
+    'apiToken': '$API_TOKEN',
+    'baseUrl': '$BASE_URL',
+    'cloudId': '$CLOUD_ID',
+    'accountId': '$ACCOUNT_ID',
+    'logLanguage': '$LOG_LANGUAGE'
+}
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+print('Global credentials saved.')
+"
+```
+
+## Step 12: Update .gitignore
+
+Ensure these lines exist in `$PROJECT_ROOT/.gitignore`:
+
+```
+.claude/current-task.json
+.claude/jira-session.json
+.claude/jira-sessions/
+.claude/jira-autopilot.local.json
+.claude/jira-autopilot.declined
+```
+
+Read the existing `.gitignore` and append only missing lines. Create the file if it does not exist.
+
+## Step 13: Remove Declined Marker
+
+If `.claude/jira-autopilot.declined` exists, delete it:
+
+```bash
+rm -f "$PROJECT_ROOT/.claude/jira-autopilot.declined"
+```
+
+## Step 14: Confirm Setup
+
+Display a summary of the saved configuration:
+
+```
+Jira Autopilot configured:
+  Project:   {projectKey} (or "Monitoring mode" if empty)
+  Connected: {displayName} ({email})
+  Autonomy:  {autonomyLevel} ({description})
+  Accuracy:  {accuracy}
+  Language:  {logLanguage}
+  Debug:     {debugLog}
+
+Run /start-work to begin tracking a Jira task.
+```
+
+## Re-configuration
+
+If `.claude/jira-autopilot.json` already exists when this command runs:
+- Show current configuration values.
+- Ask: "What would you like to change?" with options for each setting category.
+- Only update the fields the user wants to change.
+- Re-test connectivity if credentials change.

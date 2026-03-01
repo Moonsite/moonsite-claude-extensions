@@ -1,17 +1,17 @@
-"""Shared test fixtures for jira-autopilot tests."""
-import os
 import pytest
+import os
 
 
 @pytest.fixture(autouse=True)
-def isolate_debug_log(tmp_path, monkeypatch):
-    """Redirect debug log to temp dir so tests don't write to ~/.claude/."""
-    log_path = str(tmp_path / "test-debug.log")
-    monkeypatch.setenv("JIRA_AUTOPILOT_DEBUG_LOG", log_path)
+def isolate_global_config(tmp_path, monkeypatch):
+    """Prevent tests from using real global credentials."""
+    fake_global = str(tmp_path / "nonexistent-global.json")
+    monkeypatch.setattr("jira_core.GLOBAL_CONFIG_PATH", fake_global)
 
 
-@pytest.fixture(autouse=True)
-def isolate_api_log(tmp_path, monkeypatch):
-    """Redirect API log to temp dir so tests don't write to ~/.claude/."""
-    log_path = str(tmp_path / "test-api.log")
-    monkeypatch.setenv("JIRA_AUTOPILOT_API_LOG", log_path)
+@pytest.fixture
+def project_root(tmp_path):
+    """Create a project root with .claude directory."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    return tmp_path
