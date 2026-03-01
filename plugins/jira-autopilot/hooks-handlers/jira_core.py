@@ -760,7 +760,41 @@ def cmd_pre_tool_use():
 
 
 def cmd_user_prompt_submit():
-    pass
+    """UserPromptSubmit hook: output statusline with active issue and elapsed time."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        return
+
+    current = session.get("currentIssue")
+    if not current:
+        return
+
+    active_issues = session.get("activeIssues", {})
+    issue_data = active_issues.get(current)
+    if not issue_data:
+        return
+
+    # Calculate elapsed time since issue startTime
+    start_time = issue_data.get("startTime", 0)
+    if start_time <= 0:
+        return
+
+    elapsed = int(time.time()) - start_time
+    if elapsed < 0:
+        elapsed = 0
+
+    # Format as "Xh Ym"
+    hours = elapsed // 3600
+    minutes = (elapsed % 3600) // 60
+    if hours > 0:
+        time_str = f"{hours}h {minutes:02d}m"
+    else:
+        time_str = f"{minutes}m"
+
+    statusline = {"iconLabel": f"{current} \u23f1 {time_str}"}
+    print(json.dumps(statusline))
 
 
 def cmd_classify_issue():
