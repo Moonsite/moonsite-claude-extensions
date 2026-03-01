@@ -650,7 +650,64 @@ def cmd_drain_buffer():
 
 
 def cmd_session_end():
-    pass
+    """Finalize session: build worklogs, post to Jira, archive."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        return
+
+    cfg = load_config(root)
+
+    # Save session state first (local-first principle)
+    save_session(root, session)
+
+    active_issues = session.get("activeIssues", {})
+    work_chunks = session.get("workChunks", [])
+
+    # If no active issues, just archive
+    if not active_issues:
+        _archive_session(root, session)
+        return
+
+    # Build and post worklogs for each active issue with work
+    for issue_key, issue_data in active_issues.items():
+        total_seconds = issue_data.get("totalSeconds", 0)
+
+        # Calculate time from work chunks if totalSeconds is 0
+        if total_seconds <= 0:
+            for chunk in work_chunks:
+                if chunk.get("issueKey") == issue_key:
+                    start = chunk.get("startTime", 0)
+                    end = chunk.get("endTime", 0)
+                    total_seconds += max(end - start, 0)
+
+        if total_seconds <= 0:
+            continue
+
+        # Cap at max worklog seconds
+        total_seconds = min(total_seconds, MAX_WORKLOG_SECONDS)
+
+        # Build comment
+        comment = _build_worklog_comment(issue_key, work_chunks)
+
+        # Post worklog
+        try:
+            add_worklog(root, issue_key, total_seconds, comment=comment)
+        except Exception:
+            # On failure, save as pending worklog
+            session.setdefault("pendingWorklogs", []).append({
+                "issueKey": issue_key,
+                "seconds": total_seconds,
+                "comment": comment,
+                "timestamp": int(time.time()),
+            })
+
+    # Save session with any pending worklogs
+    save_session(root, session)
+
+    # Archive the session
+    _archive_session(root, session)
 
 
 def cmd_post_worklogs():
@@ -658,7 +715,48 @@ def cmd_post_worklogs():
 
 
 def cmd_pre_tool_use():
-    pass
+    """PreToolUse hook: inject issue key into git commit messages."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    # Read hook input from stdin
+    try:
+        raw = sys.stdin.read()
+        hook_input = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    tool_name = hook_input.get("tool_name", "")
+    tool_input = hook_input.get("tool_input", {})
+
+    # Only activate for Bash tool
+    if tool_name != "Bash":
+        return
+
+    command = tool_input.get("command", "")
+
+    # Only activate for git commit commands
+    if "git commit" not in command:
+        return
+
+    # Load session to get current issue
+    session = load_session(root)
+    if not session:
+        return
+
+    current_issue = session.get("currentIssue")
+    if not current_issue:
+        return
+
+    # Check if the issue key is already in the commit message
+    if current_issue in command:
+        return
+
+    # Emit systemMessage suggesting the issue key
+    result = {
+        "systemMessage": f"Include the Jira issue key '{current_issue}' in the commit message. "
+                         f"Prefix the commit message with '{current_issue}: ' if not already present.",
+    }
+    print(json.dumps(result))
 
 
 def cmd_user_prompt_submit():
@@ -674,7 +772,18 @@ def cmd_classify_issue():
 
 
 def cmd_auto_create_issue():
-    pass
+    """CLI wrapper for _attempt_auto_create()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    description = sys.argv[3] if len(sys.argv) > 3 else ""
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"error": "No active session"}))
+        return
+
+    cfg = load_config(root)
+    result = _attempt_auto_create(root, description, session, cfg)
+    print(json.dumps(result or {}))
 
 
 def cmd_suggest_parent():
@@ -693,23 +802,274 @@ def cmd_build_worklog():
 
 
 def cmd_create_issue():
-    pass
+    """CLI wrapper for create_issue()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    data = json.loads(sys.stdin.read())
+    result = create_issue(
+        root,
+        project_key=data.get("projectKey", ""),
+        summary=data.get("summary", ""),
+        issue_type=data.get("issueType", "Task"),
+        description=data.get("description", ""),
+    )
+    print(json.dumps(result))
 
 
 def cmd_get_issue():
-    pass
+    """CLI wrapper for get_issue()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    issue_key = sys.argv[3] if len(sys.argv) > 3 else ""
+    result = get_issue(root, issue_key)
+    print(json.dumps(result))
 
 
 def cmd_add_worklog():
-    pass
+    """CLI wrapper for add_worklog()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    data = json.loads(sys.stdin.read())
+    result = add_worklog(
+        root,
+        issue_key=data.get("issueKey", ""),
+        seconds=data.get("seconds", 0),
+        comment=data.get("comment", ""),
+    )
+    print(json.dumps(result))
 
 
 def cmd_get_projects():
-    pass
+    """CLI wrapper for jira_get_projects()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    result = jira_get_projects(root)
+    print(json.dumps(result))
 
 
 def cmd_debug_log():
     pass
+
+
+# ── ADF Helpers ───────────────────────────────────────────
+
+
+def _text_to_adf(text):
+    """Convert plain text to Atlassian Document Format (ADF)."""
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": text},
+                ],
+            },
+        ],
+    }
+
+
+# ── Jira REST API Client ─────────────────────────────────
+
+
+def jira_request(root, method, path, body=None, max_retries=3):
+    """Authenticated HTTP request to Jira REST API.
+
+    Returns parsed JSON response dict. On error returns {"error": ...}.
+    Retries on 429 (rate limited) with backoff.
+    """
+    base_url = get_cred(root, "baseUrl").rstrip("/")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+
+    url = base_url + path
+    auth_str = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+
+    for attempt in range(max_retries):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Basic {auth_str}")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_data = resp.read()
+                if resp_data:
+                    return json.loads(resp_data)
+                return {}
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < max_retries - 1:
+                retry_after = 1
+                try:
+                    retry_after = int(e.headers.get("Retry-After", "1"))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+                time.sleep(retry_after)
+                continue
+            api_log(f"HTTP {e.code} {method} {path}")
+            return {"error": f"HTTP {e.code}: {e.msg}"}
+        except (urllib.error.URLError, OSError) as e:
+            api_log(f"Network error {method} {path}: {e}")
+            return {"error": str(e)}
+
+    return {"error": "Max retries exceeded"}
+
+
+def jira_get_projects(root):
+    """Fetch all Jira projects with pagination. Returns list of {key, name}."""
+    projects = []
+    start_at = 0
+    max_results = 50
+
+    while True:
+        try:
+            result = jira_request(
+                root, "GET",
+                f"/rest/api/3/project/search?startAt={start_at}&maxResults={max_results}",
+            )
+        except Exception:
+            return []
+
+        if not result or "error" in result:
+            if not projects:
+                return []
+            break
+
+        values = result.get("values", [])
+        for p in values:
+            projects.append({"key": p["key"], "name": p["name"]})
+
+        if result.get("isLast", True):
+            break
+
+        start_at += len(values)
+        if not values:
+            break
+
+    return projects
+
+
+def create_issue(root, project_key, summary, issue_type="Task", description="", parent_key=None):
+    """Create a Jira issue. Returns API response dict with 'key' on success."""
+    fields = {
+        "project": {"key": project_key},
+        "summary": summary,
+        "issuetype": {"name": issue_type},
+    }
+
+    if description:
+        fields["description"] = _text_to_adf(description)
+
+    if parent_key:
+        fields["parent"] = {"key": parent_key}
+
+    body = {"fields": fields}
+    return jira_request(root, "POST", "/rest/api/3/issue", body=body)
+
+
+def add_worklog(root, issue_key, seconds, comment=""):
+    """Post a worklog entry to a Jira issue."""
+    body = {
+        "timeSpentSeconds": seconds,
+    }
+
+    if comment:
+        body["comment"] = _text_to_adf(comment)
+
+    return jira_request(root, "POST", f"/rest/api/3/issue/{issue_key}/worklog", body=body)
+
+
+def get_issue(root, issue_key):
+    """Fetch issue details from Jira."""
+    return jira_request(root, "GET", f"/rest/api/3/issue/{issue_key}")
+
+
+# ── Auto Issue Creation ───────────────────────────────────
+
+
+def _attempt_auto_create(root, description, session, cfg):
+    """Attempt to automatically create a Jira issue.
+
+    Returns dict with key/type/parent on success, None or {} on skip.
+    Respects autonomy level and autoCreate config flag.
+    """
+    autonomy = session.get("autonomyLevel", "C")
+    auto_create = cfg.get("autoCreate", False)
+    project_key = cfg.get("projectKey", "")
+
+    # Cautious mode never auto-creates
+    if autonomy == "C":
+        return None
+
+    # If autoCreate is disabled, don't create
+    if not auto_create:
+        return None
+
+    # No project key means monitoring mode
+    if not project_key:
+        return None
+
+    # Classify the issue
+    classification = classify_issue(description)
+    issue_type = classification["type"]
+
+    # Get parent key from session context
+    parent_key = session.get("lastParentKey")
+
+    # Create the issue
+    result = create_issue(
+        root,
+        project_key=project_key,
+        summary=description,
+        issue_type=issue_type,
+        parent_key=parent_key,
+    )
+
+    if not result or "error" in result:
+        return result
+
+    # Return enriched result
+    result["type"] = issue_type
+    if parent_key:
+        result["parent"] = parent_key
+
+    return result
+
+
+# ── Session End Helpers ───────────────────────────────────
+
+
+def _build_worklog_comment(issue_key, work_chunks):
+    """Build a summary comment from work chunks for an issue."""
+    chunks = [c for c in work_chunks if c.get("issueKey") == issue_key]
+    if not chunks:
+        return "Work session"
+
+    all_files = set()
+    all_tools = set()
+    for chunk in chunks:
+        for f in chunk.get("files", chunk.get("filesChanged", [])):
+            all_files.add(f)
+        for act in chunk.get("activities", []):
+            all_tools.add(act.get("tool", ""))
+
+    parts = ["Work session:"]
+    if all_files:
+        parts.append(f"Files: {', '.join(sorted(all_files)[:5])}")
+    if all_tools:
+        parts.append(f"Tools: {', '.join(sorted(all_tools))}")
+
+    return " ".join(parts)
+
+
+def _archive_session(root, session):
+    """Archive session to .claude/jira-sessions/<sessionId>.json."""
+    session_id = session.get("sessionId", time.strftime("%Y%m%d-%H%M%S"))
+    archive_dir = os.path.join(root, ".claude", "jira-sessions")
+    os.makedirs(archive_dir, exist_ok=True)
+    archive_path = os.path.join(archive_dir, f"{session_id}.json")
+    atomic_write_json(archive_path, session)
 
 
 if __name__ == "__main__":
