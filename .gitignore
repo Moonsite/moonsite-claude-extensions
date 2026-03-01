@@ -6,3 +6,4 @@
 .claude/jira-autopilot.local.json
 .claude/jira-tracker.declined
 .claude/jira-autopilot.declined
+__pycache__/
