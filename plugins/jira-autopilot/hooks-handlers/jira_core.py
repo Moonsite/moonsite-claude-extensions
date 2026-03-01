@@ -711,7 +711,44 @@ def cmd_session_end():
 
 
 def cmd_post_worklogs():
-    pass
+    """Post pending worklogs from session state to Jira."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"error": "No active session"}))
+        return
+
+    pending = session.get("pendingWorklogs", [])
+    if not pending:
+        print(json.dumps({"posted": 0, "remaining": 0}))
+        return
+
+    posted = 0
+    failed = []
+
+    for worklog in pending:
+        issue_key = worklog.get("issueKey", "")
+        seconds = worklog.get("seconds", 0)
+        comment = worklog.get("comment", "")
+
+        if not issue_key or seconds <= 0:
+            continue
+
+        try:
+            result = add_worklog(root, issue_key, seconds, comment=comment)
+            if result and "error" not in result:
+                posted += 1
+            else:
+                failed.append(worklog)
+        except Exception:
+            failed.append(worklog)
+
+    session["pendingWorklogs"] = failed
+    save_session(root, session)
+
+    print(json.dumps({"posted": posted, "remaining": len(failed)}))
+    debug_log(f"post-worklogs: posted={posted} remaining={len(failed)}", root)
 
 
 def cmd_pre_tool_use():
@@ -821,7 +858,33 @@ def cmd_auto_create_issue():
 
 
 def cmd_suggest_parent():
-    pass
+    """Suggest a parent issue for a new sub-task."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"parentKey": None}))
+        return
+
+    # First check lastParentKey in session
+    last_parent = session.get("lastParentKey")
+    if last_parent:
+        print(json.dumps({"parentKey": last_parent, "source": "session"}))
+        return
+
+    # Fall back to activeIssues keys
+    active_issues = session.get("activeIssues", {})
+    if active_issues:
+        # Use the current issue if set, otherwise first active issue
+        current = session.get("currentIssue")
+        if current and current in active_issues:
+            print(json.dumps({"parentKey": current, "source": "session"}))
+            return
+        first_key = next(iter(active_issues))
+        print(json.dumps({"parentKey": first_key, "source": "session"}))
+        return
+
+    print(json.dumps({"parentKey": None}))
 
 
 def cmd_build_worklog():
@@ -878,7 +941,17 @@ def cmd_get_projects():
 
 
 def cmd_debug_log():
-    pass
+    """CLI wrapper for debug_log — log a message from the command line."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    # Message from argv or stdin
+    if len(sys.argv) > 3:
+        message = " ".join(sys.argv[3:])
+    else:
+        message = sys.stdin.read().strip()
+
+    if message:
+        debug_log(message, root)
 
 
 # ── ADF Helpers ───────────────────────────────────────────
