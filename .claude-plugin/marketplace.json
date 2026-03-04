@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -14,7 +14,7 @@
       "name": "jira-autopilot",
       "source": "./plugins/jira-autopilot",
       "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
-      "version": "3.20.0",
+      "version": "4.0.0",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -33,23 +33,22 @@
     {
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
-      "description": "Proactively generates HTML from markdown in docs/ folders, captures images from Figma/Playwright, and maintains doc indexes",
-      "version": "1.0.0",
+      "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
+      "version": "2.0.0",
       "author": {
         "name": "Boris Sigalov"
       },
       "category": "documentation",
       "homepage": "https://github.com/Moonsite/moonsite-claude-extensions",
       "keywords": [
+        "markdown",
+        "html",
+        "converter",
         "documentation",
-        "specs",
-        "guides",
-        "reports",
-        "authoring",
-        "figma",
-        "playwright",
         "hebrew",
-        "rtl"
+        "rtl",
+        "toc",
+        "index"
       ]
     }
   ],
@@ -72,6 +71,23 @@
         "rtl",
         "docx",
         "umbraco"
+      ]
+    },
+    {
+      "name": "bump-release",
+      "source": "./skills/bump-release",
+      "description": "Bump version across all project files, commit, push, and create PR",
+      "version": "1.0.0",
+      "author": {
+        "name": "Boris Sigalov"
+      },
+      "category": "workflow",
+      "keywords": [
+        "version",
+        "bump",
+        "release",
+        "semver",
+        "publish"
       ]
     }
   ]

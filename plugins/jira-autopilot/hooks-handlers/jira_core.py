@@ -1,103 +1,124 @@
 #!/usr/bin/env python3
-"""jira-autopilot core module — all business logic for hooks and commands."""
+"""jira_core.py — Core business logic for jira-autopilot v4."""
 
 import base64
 import json
+import math
 import os
 import re
-import sys
-import time
-import math
 import subprocess
+import sys
 import tempfile
+import time
 import urllib.request
 import urllib.error
-from pathlib import Path
-from datetime import datetime
-from collections import Counter
 
-# ── Constants ──────────────────────────────────────────────────────────────
+# ── Constants ──────────────────────────────────────────────
 
-CONFIG_NAME = "jira-autopilot.json"
-LOCAL_CONFIG_NAME = "jira-autopilot.local.json"
-GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "jira-autopilot.global.json"
-SESSION_NAME = "jira-session.json"
-DEBUG_LOG_PATH = Path.home() / ".claude" / "jira-autopilot-debug.log"
-API_LOG_PATH = Path.home() / ".claude" / "jira-autopilot-api.log"
+GLOBAL_CONFIG_PATH = os.path.expanduser("~/.claude/jira-autopilot.global.json")
+DEBUG_LOG_PATH = os.path.expanduser("~/.claude/jira-autopilot-debug.log")
+API_LOG_PATH = os.path.expanduser("~/.claude/jira-autopilot-api.log")
 MAX_LOG_SIZE = 1_000_000  # 1MB
-MAX_WORKLOG_SECONDS = 14400  # 4 hours — sanity cap for a single worklog
-STALE_ISSUE_SECONDS = 86400  # 24 hours — threshold for stale issue cleanup
+MAX_WORKLOG_SECONDS = 14400  # 4 hours
+STALE_ISSUE_SECONDS = 86400  # 24 hours
 
-READ_ONLY_TOOLS = frozenset([
+READ_ONLY_TOOLS = {
     "Read", "Glob", "Grep", "LS", "WebSearch", "WebFetch",
-    "TodoRead", "NotebookRead", "AskUserQuestion",
-    "TaskList", "TaskGet", "ToolSearch", "Skill", "Task",
-    "ListMcpResourcesTool", "BashOutput",
-])
+    "TodoRead", "NotebookRead", "AskUserQuestion", "TaskList",
+    "TaskGet", "ToolSearch", "Skill", "Task", "ListMcpResourcesTool",
+    "BashOutput",
+}
 
-# Skill names containing these substrings are treated as planning activities.
-PLANNING_SKILL_PATTERNS = frozenset(["plan", "brainstorm", "spec", "explore", "research"])
-
-# First file-write tool after plan mode ends planning automatically.
-PLANNING_IMPL_TOOLS = frozenset(["Edit", "Write", "MultiEdit", "NotebookEdit"])
+PLANNING_SKILL_PATTERNS = ["plan", "brainstorm", "spec", "explore", "research"]
+PLANNING_IMPL_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 BUG_SIGNALS = [
     "fix", "bug", "broken", "crash", "error", "fail",
     "regression", "not working", "issue with",
 ]
 TASK_SIGNALS = [
-    "add", "create", "implement", "build", "setup",
-    "configure", "refactor", "update", "migrate",
+    "implement", "add", "create", "build", "refactor",
+    "update", "improve", "migrate", "setup", "configure",
 ]
 
+CREDENTIAL_PATTERNS = [
+    (r"ATATT3x[A-Za-z0-9_/+=.\-]+", "[REDACTED_TOKEN]"),
+    (r"Bearer [A-Za-z0-9_/+=.\-]+", "Bearer [REDACTED]"),
+    (r"Basic [A-Za-z0-9_/+=]+", "Basic [REDACTED]"),
+    (r"-u [^:]+:[^ ]+", "-u [REDACTED]"),
+    (r'"apiToken"\s*:\s*"[^"]+"', '"apiToken": "[REDACTED]"'),
+]
 
-# ── Config Loading ─────────────────────────────────────────────────────────
-
-def load_config(root: str) -> dict:
-    path = os.path.join(root, ".claude", CONFIG_NAME)
-    if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
-    return {}
-
-
-def load_local_config(root: str) -> dict:
-    path = os.path.join(root, ".claude", LOCAL_CONFIG_NAME)
-    if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
-    return {}
+# ── Logging ────────────────────────────────────────────────
 
 
-def load_global_config() -> dict:
-    if GLOBAL_CONFIG_PATH.exists():
-        with open(GLOBAL_CONFIG_PATH) as f:
-            return json.load(f)
-    return {}
+def _rotate_log(path):
+    """Rotate log file if it exceeds MAX_LOG_SIZE."""
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > MAX_LOG_SIZE:
+            backup = path + ".1"
+            if os.path.exists(backup):
+                os.remove(backup)
+            os.rename(path, backup)
+    except OSError:
+        pass
 
 
-def load_session(root: str) -> dict:
-    path = os.path.join(root, ".claude", SESSION_NAME)
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, ValueError) as e:
-            debug_log(f"Corrupt session file, resetting: {e}", category="session-load")
-            return {}
-    return {}
+def sanitize_for_log(text):
+    """Redact credentials from text."""
+    if not isinstance(text, str):
+        text = str(text)
+    for pattern, replacement in CREDENTIAL_PATTERNS:
+        text = re.sub(pattern, replacement, text)
+    return text
 
 
-def save_session(root: str, data: dict):
-    path = os.path.join(root, ".claude", SESSION_NAME)
-    dir_path = os.path.dirname(path)
-    os.makedirs(dir_path, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+def debug_log(message, root=None):
+    """Write sanitized message to debug log."""
+    cfg = {}
+    if root:
+        cfg = load_config(root)
+    if not cfg.get("debugLog", True):
+        return
+    _rotate_log(DEBUG_LOG_PATH)
+    try:
+        os.makedirs(os.path.dirname(DEBUG_LOG_PATH), exist_ok=True)
+        with open(DEBUG_LOG_PATH, "a") as f:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] {sanitize_for_log(message)}\n")
+    except OSError:
+        pass
+
+
+def api_log(message):
+    """Write sanitized message to API log."""
+    _rotate_log(API_LOG_PATH)
+    try:
+        os.makedirs(os.path.dirname(API_LOG_PATH), exist_ok=True)
+        with open(API_LOG_PATH, "a") as f:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] {sanitize_for_log(message)}\n")
+    except OSError:
+        pass
+
+
+# ── Atomic File I/O ────────────────────────────────────────
+
+
+def atomic_write_json(path, data):
+    """Write JSON atomically: temp file -> fsync -> os.replace."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(path) or ".",
+        suffix=".tmp",
+    )
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
-    except BaseException:
+    except Exception:
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -105,966 +126,440 @@ def save_session(root: str, data: dict):
         raise
 
 
-def get_cred(root: str, field: str) -> str:
-    """Load credential field with fallback: project-local -> global."""
-    val = load_local_config(root).get(field, "")
-    if not val:
-        val = load_global_config().get(field, "")
-    return val or ""
+# ── Config Loading ─────────────────────────────────────────
 
 
-def get_log_language(root: str) -> str:
-    """Return the configured worklog language. Project config overrides global default."""
-    lang = load_config(root).get("logLanguage", "")
-    if not lang:
-        lang = load_global_config().get("logLanguage", "")
-    return lang or "English"
+def load_config(root):
+    """Load project config from .claude/jira-autopilot.json."""
+    path = os.path.join(root, ".claude", "jira-autopilot.json")
+    return _load_json(path)
 
 
-# ── Debug Logging ──────────────────────────────────────────────────────────
-
-def debug_log(message: str, category: str = "general", enabled: bool = True,
-              log_path: str = None, **kwargs):
-    if not enabled:
-        return
-    # Allow override via env var (used by tests to avoid writing to global log)
-    env_path = os.environ.get("JIRA_AUTOPILOT_DEBUG_LOG")
-    path = Path(log_path) if log_path else (Path(env_path) if env_path else DEBUG_LOG_PATH)
-    # Rotate if too large
-    if path.exists() and path.stat().st_size > MAX_LOG_SIZE:
-        backup = path.with_suffix(".log.1")
-        if backup.exists():
-            backup.unlink()
-        path.rename(backup)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    extra = " ".join(f"{k}={v}" for k, v in kwargs.items())
-    line = f"[{ts}] [{category}] {message}"
-    if extra:
-        line += f" {extra}"
-    with open(path, "a") as f:
-        f.write(line + "\n")
-
-
-def _log_api_call(method: str, path: str, status: int, elapsed_ms: int,
-                  detail: str = "", log_path: str = None):
-    """Always-on API call logger. Writes to ~/.claude/jira-autopilot-api.log."""
-    env_path = os.environ.get("JIRA_AUTOPILOT_API_LOG")
-    p = Path(log_path) if log_path else (Path(env_path) if env_path else API_LOG_PATH)
-    # Rotate if too large
-    if p.exists() and p.stat().st_size > MAX_LOG_SIZE:
-        backup = p.with_suffix(".log.1")
-        if backup.exists():
-            backup.unlink()
-        p.rename(backup)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] [api] {method} {path} status={status} time={elapsed_ms}ms"
-    if detail:
-        line += f" {detail}"
-    with open(p, "a") as f:
-        f.write(line + "\n")
-
-
-# ── AI Enrichment ─────────────────────────────────────────────────────
-
-def _enrich_summary_via_ai(raw_facts: dict, language: str, api_key: str) -> str:
-    """Call Anthropic API (Haiku) to produce a concise worklog description.
-
-    Returns enriched text or "" on any failure.
-    """
-    files = raw_facts.get("files", [])
-    commands = raw_facts.get("commands", [])
-    activity_count = raw_facts.get("activityCount", 0)
-
-    file_basenames = [os.path.basename(f) for f in files if f][:10]
-    cmd_list = commands[:5]
-
-    facts_text = (
-        f"Files: {', '.join(file_basenames) if file_basenames else 'none'}\n"
-        f"Commands: {', '.join(cmd_list) if cmd_list else 'none'}\n"
-        f"Activity count: {activity_count}"
-    )
-
-    prompt = (
-        f"Write a concise Jira worklog description (1-2 sentences, max 120 chars) "
-        f"in {language} summarizing the work done. "
-        f"Use professional tone, no markdown, no bullet points.\n\n"
-        f"Facts:\n{facts_text}"
-    )
-
-    payload = json.dumps({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 150,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload, method="POST",
-    )
-    req.add_header("x-api-key", api_key)
-    req.add_header("anthropic-version", "2023-06-01")
-    req.add_header("Content-Type", "application/json")
-
-    start_ts = time.time()
+def _load_json(path):
+    """Load JSON file, returning {} on any error."""
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            data = json.loads(resp.read())
-            text = data.get("content", [{}])[0].get("text", "").strip()
-            _log_api_call("POST", "/v1/messages", resp.status, elapsed_ms,
-                          f"model=haiku chars={len(text)}")
-            return text
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", "/v1/messages", e.code, elapsed_ms,
-                      f"error={e.reason}")
-        return ""
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", "/v1/messages", 0, elapsed_ms,
-                      f"error={type(e).__name__}")
-        return ""
-
-
-def _maybe_enrich_worklog_summary(root: str, raw_facts: dict, fallback_summary: str) -> str:
-    """Enrich worklog summary via AI if anthropicApiKey is configured.
-
-    Returns fallback_summary if no key or on API failure.
-    """
-    api_key = get_cred(root, "anthropicApiKey")
-    if not api_key:
-        return fallback_summary
-    language = get_log_language(root)
-    enriched = _enrich_summary_via_ai(raw_facts, language, api_key)
-    return enriched if enriched else fallback_summary
-
-
-# ── CLI Dispatcher ─────────────────────────────────────────────────────────
-
-def cmd_create_issue(args):
-    """Create a Jira issue via REST API. Prints the new issue key on success.
-
-    Usage: jira_core.py create-issue <root> --project KEY --summary TEXT
-           [--type Task|Bug|Story|Subtask] [--parent KEY]
-           [--account-id ID] [--cloud-id ID] [--labels l1,l2]
-    """
-    root = args[0] if args else "."
-    # Parse flags
-    params = {}
-    i = 1
-    while i < len(args):
-        if args[i].startswith("--") and i + 1 < len(args):
-            params[args[i][2:]] = args[i + 1]
-            i += 2
-        else:
-            i += 1
-
-    project_key = params.get("project", "")
-    summary = params.get("summary", "")
-    issue_type = params.get("type", "Task")
-    parent_key = params.get("parent", "")
-    assignee_id = params.get("account-id", "")
-    labels_raw = params.get("labels", "")
-    labels = [l.strip() for l in labels_raw.split(",") if l.strip()] if labels_raw else []
-
-    if not project_key or not summary:
-        print("Error: --project and --summary are required", file=sys.stderr)
-        sys.exit(1)
-
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    if not (base_url and email and api_token):
-        print("Error: missing credentials in jira-autopilot.local.json", file=sys.stderr)
-        sys.exit(1)
-
-    url = f"{base_url.rstrip('/')}/rest/api/3/issue"
-    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-    fields: dict = {
-        "project": {"key": project_key},
-        "summary": summary,
-        "issuetype": {"name": issue_type},
-    }
-    if parent_key:
-        fields["parent"] = {"key": parent_key}
-    if assignee_id:
-        fields["assignee"] = {"id": assignee_id}
-    if labels:
-        fields["labels"] = labels
-
-    payload = json.dumps({"fields": fields}).encode()
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    start_ts = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            data = json.loads(resp.read())
-            key = data.get("key", "")
-            _log_api_call("POST", "/rest/api/3/issue", resp.status, elapsed_ms,
-                          f"key={key}")
-            print(json.dumps({"key": key, "id": data.get("id", "")}))
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        body = e.read().decode(errors="replace")
-        _log_api_call("POST", "/rest/api/3/issue", e.code, elapsed_ms,
-                      f"error={e.reason}")
-        debug_log(f"create-issue HTTP {e.code} {e.reason}: {body[:200]}",
-                  category="jira-api")
-        print(f"Error: HTTP {e.code} {e.reason}: {body[:200]}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", "/rest/api/3/issue", 0, elapsed_ms,
-                      f"error={type(e).__name__}")
-        debug_log(f"create-issue error: {e}", category="jira-api")
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def cmd_get_issue(args):
-    """Fetch a Jira issue by key via REST API. Prints JSON with key/summary/status/type.
-
-    Usage: jira_core.py get-issue <root> <ISSUE-KEY>
-    """
-    root = args[0] if args else "."
-    issue_key = args[1] if len(args) > 1 else ""
-    if not issue_key:
-        print("Error: issue key required", file=sys.stderr)
-        sys.exit(1)
-
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    if not (base_url and email and api_token):
-        print("Error: missing credentials", file=sys.stderr)
-        sys.exit(1)
-
-    url = (f"{base_url.rstrip('/')}/rest/api/3/issue/{issue_key}"
-           "?fields=summary,status,issuetype,parent,assignee")
-    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-    req = urllib.request.Request(url, method="GET")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Accept", "application/json")
-    api_path = f"/rest/api/3/issue/{issue_key}"
-    start_ts = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            data = json.loads(resp.read())
-            fields = data.get("fields", {})
-            _log_api_call("GET", api_path, resp.status, elapsed_ms,
-                          f"key={issue_key}")
-            print(json.dumps({
-                "key": data.get("key"),
-                "summary": fields.get("summary"),
-                "status": fields.get("status", {}).get("name"),
-                "type": fields.get("issuetype", {}).get("name"),
-                "parent": fields.get("parent", {}).get("key") if fields.get("parent") else None,
-            }))
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("GET", api_path, e.code, elapsed_ms, f"error={e.reason}")
-        debug_log(f"get-issue HTTP {e.code} {e.reason}", category="jira-api")
-        print(f"Error: HTTP {e.code} {e.reason}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("GET", api_path, 0, elapsed_ms, f"error={type(e).__name__}")
-        debug_log(f"get-issue error: {e}", category="jira-api")
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def cmd_add_worklog(args):
-    """Add a worklog to a Jira issue via REST API.
-
-    Usage: jira_core.py add-worklog <root> <ISSUE-KEY> <seconds> [comment]
-    """
-    root = args[0] if args else "."
-    issue_key = args[1] if len(args) > 1 else ""
-    seconds = int(args[2]) if len(args) > 2 else 0
-    comment = args[3] if len(args) > 3 else ""
-    if not issue_key or seconds <= 0:
-        print("Error: issue key and seconds required", file=sys.stderr)
-        sys.exit(1)
-
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    if not (base_url and email and api_token):
-        print("Error: missing credentials", file=sys.stderr)
-        sys.exit(1)
-
-    ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, comment,
-                              language=get_log_language(root))
-    if ok:
-        print(json.dumps({"ok": True, "issue": issue_key, "seconds": seconds}))
-    else:
-        print("Error: worklog post failed", file=sys.stderr)
-        sys.exit(1)
-
-
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: jira_core.py <command> [args...]", file=sys.stderr)
-        sys.exit(1)
-    cmd = sys.argv[1]
-    args = sys.argv[2:]
-    commands = {
-        "session-start": cmd_session_start,
-        "log-activity": cmd_log_activity,
-        "drain-buffer": cmd_drain_buffer,
-        "session-end": cmd_session_end,
-        "post-worklogs": cmd_post_worklogs,
-        "classify-issue": cmd_classify_issue,
-        "auto-create-issue": cmd_auto_create_issue,
-        "suggest-parent": cmd_suggest_parent,
-        "build-worklog": cmd_build_worklog,
-        "debug-log": cmd_debug_log,
-        # REST API commands (no curl dependency)
-        "create-issue": cmd_create_issue,
-        "get-issue": cmd_get_issue,
-        "add-worklog": cmd_add_worklog,
-        "get-projects": cmd_get_projects,
-    }
-    fn = commands.get(cmd)
-    if not fn:
-        print(f"Unknown command: {cmd}", file=sys.stderr)
-        sys.exit(1)
-    fn(args)
-
-
-def cmd_debug_log(args):
-    root = args[0] if args else "."
-    msg = args[1] if len(args) > 1 else "test"
-    cfg = load_config(root)
-    debug_log(msg, enabled=cfg.get("debugLog", False))
-
-
-# ── Commands ───────────────────────────────────────────────────────────────
-
-OLD_CONFIG_NAMES = {
-    "jira-tracker.json": CONFIG_NAME,
-    "jira-tracker.local.json": LOCAL_CONFIG_NAME,
-}
-
-
-def _migrate_old_configs(root: str):
-    """Rename old jira-tracker.* config files to jira-autopilot.*."""
-    claude_dir = os.path.join(root, ".claude")
-    if not os.path.isdir(claude_dir):
-        return
-    for old_name, new_name in OLD_CONFIG_NAMES.items():
-        old_path = os.path.join(claude_dir, old_name)
-        new_path = os.path.join(claude_dir, new_name)
-        if os.path.exists(old_path) and not os.path.exists(new_path):
-            os.rename(old_path, new_path)
-            debug_log(f"Migrated {old_name} → {new_name}", category="migration")
-
-
-def _detect_issue_from_branch(root: str, cfg: dict) -> str | None:
-    """Try to extract issue key from current git branch name."""
-    pattern = cfg.get("branchPattern", "")
-    project_key = cfg.get("projectKey", "")
-    if not pattern or not project_key:
-        return None
-    # Replace {key} placeholder with actual project key
-    pattern = pattern.replace("{key}", re.escape(project_key))
-    try:
-        branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=root, timeout=5,
-        ).stdout.strip()
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return None
-    if not branch:
-        return None
-    debug_log(f"Branch detection: branch={branch!r} pattern={pattern!r}",
-              category="session-start")
-    m = re.search(pattern, branch)
-    if m and m.groups():
-        return m.group(1)
-    debug_log(f"Branch detection: no match for branch={branch!r}",
-              category="session-start")
-    return None
-
-
-def _resolve_autonomy(session: dict, cfg: dict) -> str:
-    """Return autonomy letter A/B/C from session or config (handles numeric 1-10 too)."""
-    raw = session.get("autonomyLevel") or cfg.get("autonomyLevel", "C")
-    if isinstance(raw, int) or (isinstance(raw, str) and raw.isdigit()):
-        n = int(raw)
-        if n == 10:
-            return "A"
-        elif n >= 6:
-            return "B"
-        else:
-            return "C"
-    return str(raw).upper() if str(raw).upper() in ("A", "B", "C") else "C"
-
-
-def extract_summary_from_prompt(prompt: str) -> str:
-    """Extract a clean issue summary from a user prompt.
-
-    Strips leading noise verbs, takes the first sentence, capitalizes,
-    and truncates to 80 chars.
-    """
-    if not prompt:
-        return ""
-    # Take first sentence
-    first = re.split(r'[.!?\n]', prompt.strip())[0].strip()
-    # Strip leading noise phrases (case-insensitive)
-    noise = r'^(?:please\s+|can you\s+|could you\s+|i need to\s+|i need you to\s+|i want to\s+|help me\s+|let\'s\s+|let me\s+)+'
-    first = re.sub(noise, '', first, flags=re.IGNORECASE).strip()
-    if not first:
-        return ""
-    # Capitalize first letter
-    first = first[0].upper() + first[1:]
-    return first[:80]
-
-
-def _is_duplicate_issue(session: dict, summary: str) -> "str | None":
-    """Return existing issue key if token overlap with summary exceeds 60%, else None."""
-    if not summary:
-        return None
-    summary_tokens = set(re.findall(r'\w+', summary.lower()))
-    if not summary_tokens:
-        return None
-    for key, data in session.get("activeIssues", {}).items():
-        existing = data.get("summary", "")
-        if not existing:
-            continue
-        existing_tokens = set(re.findall(r'\w+', existing.lower()))
-        if not existing_tokens:
-            continue
-        overlap = len(summary_tokens & existing_tokens) / len(summary_tokens | existing_tokens)
-        if overlap >= 0.60:
-            return key
-    return None
-
-
-def _get_recent_commit_messages(root: str, n: int = 5) -> list:
-    """Return last N git commit messages, empty list on any failure."""
-    try:
-        result = subprocess.run(
-            ["git", "log", "--oneline", f"-{n}"],
-            capture_output=True, text=True, cwd=root, timeout=5,
-        )
-        if result.returncode != 0:
-            return []
-        lines = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
-        # Strip the short hash prefix (7 hex chars + space)
-        messages = [re.sub(r'^[0-9a-f]{7,}\s+', '', line) for line in lines]
-        return [m for m in messages if m]
-    except Exception:
-        return []
-
-
-def _attempt_auto_create(root: str, summary: str, session: dict, cfg: dict) -> "dict | None":
-    """Try to auto-create a Jira issue. Returns result dict or None on failure/skip."""
-    autonomy = _resolve_autonomy(session, cfg)
-    if autonomy == "C":
-        return None
-    if not cfg.get("autoCreate", False):
-        return None
-
-    # Check credentials
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    if not (base_url and email and api_token):
-        return None
-
-    clean_summary = extract_summary_from_prompt(summary)
-    if not clean_summary:
-        return None
-
-    # Check duplicate
-    dup_key = _is_duplicate_issue(session, clean_summary)
-    if dup_key:
-        return {"key": dup_key, "summary": clean_summary, "duplicate": True}
-
-    # Classify and check confidence
-    classification = classify_issue(clean_summary)
-    if classification.get("confidence", 0) < 0.65:
-        return None
-
-    project_key = cfg.get("projectKey", "")
-    if not project_key:
-        return None
-
-    # Infer parent
-    parent_key = (
-        session.get("lastParentKey")
-        or session.get("currentIssue")
-        or None
-    )
-
-    issue_type = classification.get("type", "Task")
-    url = f"{base_url.rstrip('/')}/rest/api/3/issue"
-    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-    fields: dict = {
-        "project": {"key": project_key},
-        "summary": clean_summary,
-        "issuetype": {"name": issue_type},
-    }
-    if parent_key:
-        fields["parent"] = {"key": parent_key}
-
-    payload = json.dumps({"fields": fields}).encode()
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    start_ts = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            data = json.loads(resp.read())
-            new_key = data.get("key", "")
-            _log_api_call("POST", "/rest/api/3/issue", resp.status, elapsed_ms,
-                          f"auto-create key={new_key}")
-            if not new_key:
-                return None
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", "/rest/api/3/issue", 0, elapsed_ms,
-                      f"auto-create error={type(e).__name__}")
-        debug_log(f"auto-create error: {e}", category="auto-create")
-        return None
-
-    # Update session
-    session["activeIssues"][new_key] = {
-        "startTime": int(time.time()),
-        "totalSeconds": 0,
-        "paused": False,
-        "summary": clean_summary,
-    }
-    session["currentIssue"] = new_key
-    # Retroactively claim work done before this issue was known
-    claimed = _claim_null_chunks(session, new_key)
-    if claimed > 0:
-        debug_log(
-            f"auto-create retroactively claimed {claimed} null chunks for {new_key}",
-            category="auto-create",
-            enabled=cfg.get("debugLog", False),
-        )
-    if parent_key:
-        session["lastParentKey"] = parent_key
-    save_session(root, session)
-
-    debug_log(
-        f"auto-created key={new_key} type={issue_type} parent={parent_key} "
-        f"summary={clean_summary!r} autonomy={autonomy}",
-        category="auto-create",
-        enabled=cfg.get("debugLog", False),
-    )
-
-    return {
-        "key": new_key,
-        "summary": clean_summary,
-        "type": issue_type,
-        "parent": parent_key,
-        "duplicate": False,
-    }
-
-
-
-def _claim_null_chunks(session: dict, issue_key: str) -> int:
-    """Retroactively assign null-issueKey work chunks to issue_key.
-
-    Called whenever currentIssue is set for the first time, so that work
-    done before an issue was known gets attributed correctly.
-
-    Returns the count of chunks claimed. Also adds the claimed time to
-    session["activeIssues"][issue_key]["totalSeconds"] if the issue exists there.
-    """
-    claimed = 0
-    total_claimed_seconds = 0
-    for chunk in session.get("workChunks", []):
-        if chunk.get("issueKey") is not None:
-            continue
-        chunk["issueKey"] = issue_key
-        claimed += 1
-        start = chunk.get("startTime", 0)
-        end = chunk.get("endTime", 0)
-        chunk_time = end - start
-        for gap in chunk.get("idleGaps", []):
-            chunk_time -= gap.get("seconds", 0)
-        total_claimed_seconds += max(chunk_time, 0)
-
-    if claimed > 0 and issue_key in session.get("activeIssues", {}):
-        session["activeIssues"][issue_key]["totalSeconds"] = (
-            session["activeIssues"][issue_key].get("totalSeconds", 0) + total_claimed_seconds
-        )
-    return claimed
-
-
-def cmd_auto_create_issue(args):
-    """Auto-create a Jira issue from a prompt. Exits silently (no output) on skip.
-
-    Usage: jira_core.py auto-create-issue <root> <prompt_text>
-    """
-    root = args[0] if args else "."
-    prompt = args[1] if len(args) > 1 else ""
-
-    cfg = load_config(root)
-    session = load_session(root)
-    if not session:
-        return
-
-    autonomy = _resolve_autonomy(session, cfg)
-    if autonomy == "C":
-        return  # silent — caller falls back to blocking mode
-
-    result = _attempt_auto_create(root, prompt, session, cfg)
-    if result:
-        print(json.dumps(result))
-
-
-def _auto_setup_from_global(root: str) -> dict:
-    """Auto-create project config from global credentials if available.
-
-    Detects project key from git history and creates a minimal
-    .claude/jira-autopilot.json so the plugin works in any project.
-    Returns the new config dict, or {} if auto-setup is not possible.
-    """
-    gcfg = load_global_config()
-    if not gcfg.get("apiToken") or not gcfg.get("baseUrl"):
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
         return {}
 
-    # Detect project key from git commits/branches (may be None for non-git dirs)
-    detected_key = _detect_project_key_from_git(root) or ""
 
-    # Validate detected key against real Jira projects
-    project_key = ""
-    if detected_key:
-        real_projects = jira_get_projects(root)
-        real_keys = {p["key"] for p in real_projects}
-        if detected_key in real_keys:
-            project_key = detected_key
-        else:
-            debug_log(f"Auto-setup: git-detected key '{detected_key}' not found in Jira "
-                      f"(available: {', '.join(sorted(real_keys)) or 'none'})",
-                      category="session-start")
-
-    cfg = {
-        "projectKey": project_key,
-        "cloudId": gcfg.get("cloudId", ""),
-        "enabled": True,
-        "autonomyLevel": "A",
-        "accuracy": 10,
-        "branchPattern": f"^(?:feature|fix|hotfix|chore|docs)/({re.escape(project_key)}-\\d+)" if project_key else "",
-        "commitPattern": f"{re.escape(project_key)}-\\d+:" if project_key else "",
-        "timeRounding": 1,
-        "idleThreshold": 5,
-        "autoCreate": True,
-        "defaultLabels": ["jira-autopilot"],
-        "logLanguage": gcfg.get("logLanguage", "English"),
-    }
-
-    config_path = os.path.join(root, ".claude", CONFIG_NAME)
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-
-    # Also create local config symlink/copy from global creds
-    local_path = os.path.join(root, ".claude", LOCAL_CONFIG_NAME)
-    if not os.path.exists(local_path):
-        local_cfg = {
-            "email": gcfg.get("email", ""),
-            "apiToken": gcfg.get("apiToken", ""),
-            "baseUrl": gcfg.get("baseUrl", ""),
-            "accountId": gcfg.get("accountId", ""),
-        }
-        with open(local_path, "w") as f:
-            json.dump(local_cfg, f, indent=2)
-
-    debug_log(f"Auto-setup: created config for project {project_key or '(no key detected)'}",
-              category="session-start")
-    return cfg
+def get_cred(root, key):
+    """Get credential with local -> global fallback."""
+    local_path = os.path.join(root, ".claude", "jira-autopilot.local.json")
+    local = _load_json(local_path)
+    if local.get(key):
+        return local[key]
+    global_cfg = _load_json(GLOBAL_CONFIG_PATH)
+    return global_cfg.get(key, "")
 
 
-def _detect_project_key_from_git(root: str) -> str | None:
-    """Detect Jira project key from git commit messages and branch names."""
-    try:
-        log = subprocess.run(
-            ["git", "log", "--oneline", "-100"],
-            capture_output=True, text=True, cwd=root, timeout=5,
-        ).stdout
-        branches = subprocess.run(
-            ["git", "branch", "-a"],
-            capture_output=True, text=True, cwd=root, timeout=5,
-        ).stdout
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return None
-
-    text = log + "\n" + branches
-    keys = re.findall(r'([A-Z][A-Z0-9]+-)\d+', text)
-    if not keys:
-        return None
-    counted = Counter(keys)
-    most_common = counted.most_common(1)[0][0].rstrip("-")
-    return most_common
+# ── Session Management ─────────────────────────────────────
 
 
-def jira_get_projects(root: str) -> list[dict]:
-    """Fetch accessible Jira projects from the Jira Cloud API.
-
-    Returns list of {key, name} dicts, or [] on failure.
-    """
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    if not base_url or not email or not api_token:
-        return []
-
-    url = f"{base_url.rstrip('/')}/rest/api/3/project/search?maxResults=50&orderBy=key"
-    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-    req = urllib.request.Request(url, method="GET")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Accept", "application/json")
-    api_path = "/rest/api/3/project/search"
-    start_ts = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            _log_api_call("GET", api_path, resp.status, elapsed_ms)
-            data = json.loads(resp.read().decode())
-            values = data.get("values", [])
-            return [{"key": p["key"], "name": p.get("name", "")} for p in values]
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("GET", api_path, e.code, elapsed_ms, f"error={e.reason}")
-        debug_log(f"jira_get_projects HTTP error status={e.code} reason={e.reason}",
-                  category="jira-api")
-        return []
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("GET", api_path, 0, elapsed_ms, f"error={type(e).__name__}")
-        debug_log(f"jira_get_projects error={type(e).__name__}: {e}",
-                  category="jira-api")
-        return []
-
-
-def cmd_get_projects(args):
-    """CLI command: fetch and print accessible Jira projects as JSON."""
-    root = args[0] if args else "."
-    projects = jira_get_projects(root)
-    print(json.dumps(projects))
-
-
-def cmd_session_start(args):
-    root = args[0] if args else "."
-    _migrate_old_configs(root)
-
-    cfg = load_config(root)
-
-    # Auto-setup: if no project config exists, try creating one from global creds
-    if not cfg:
-        cfg = _auto_setup_from_global(root)
-
-    if not cfg.get("enabled", True):
-        debug_log("Plugin disabled via config — skipping session start",
-                  category="session-start", enabled=cfg.get("debugLog", False))
-        return
-
-    existing = load_session(root)
-    # If there's already an active session with issues, preserve it
-    if existing.get("activeIssues"):
-        # Prune stale issues: older than 24h with zero work chunks
-        now = int(time.time())
-        stale_keys = []
-        for key, data in existing["activeIssues"].items():
-            start = data.get("startTime", 0)
-            if start > 0 and (now - start) > STALE_ISSUE_SECONDS:
-                has_chunks = any(
-                    c.get("issueKey") == key for c in existing.get("workChunks", [])
-                )
-                if not has_chunks and data.get("totalSeconds", 0) == 0:
-                    stale_keys.append(key)
-        for key in stale_keys:
-            del existing["activeIssues"][key]
-            if existing.get("currentIssue") == key:
-                existing["currentIssue"] = None
-            debug_log(f"Removed stale issue {key} (>24h, no work)",
-                      category="session-start", enabled=cfg.get("debugLog", False))
-
-        # Always sync autonomy/accuracy from config (may have changed via /jira-setup)
-        existing["autonomyLevel"] = cfg.get("autonomyLevel", "C")
-        existing["accuracy"] = cfg.get("accuracy", 5)
-        # Ensure activeTasks / activePlanning / lastWorklogTime exist (may be missing in older sessions)
-        existing.setdefault("activeTasks", {})
-        existing.setdefault("activePlanning", None)
-        existing.setdefault("lastWorklogTime", int(time.time()))
-        # Assign sessionId if missing (sessions created by /jira-start may lack one)
-        if not existing.get("sessionId"):
-            existing["sessionId"] = datetime.now().strftime("%Y%m%d-%H%M%S")
-        # Sanitize any credentials that may have been logged before the fix
-        _sanitize_session_commands(existing)
-        save_session(root, existing)
-        debug_log(
-            "Resuming existing session",
-            category="session-start",
-            enabled=cfg.get("debugLog", False),
-            sessionId=existing.get("sessionId", ""),
-        )
-        return
-
-    session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-    session = {
-        "sessionId": session_id,
-        "autonomyLevel": cfg.get("autonomyLevel", "C"),
-        "accuracy": cfg.get("accuracy", 5),
+def _new_session():
+    """Create a fresh session structure with all required fields."""
+    return {
+        "sessionId": time.strftime("%Y%m%d-%H%M%S"),
+        "autonomyLevel": "C",
+        "accuracy": 5,
         "disabled": False,
         "activeIssues": {},
         "currentIssue": None,
         "lastParentKey": None,
         "workChunks": [],
         "pendingWorklogs": [],
+        "pendingIssues": [],
         "activityBuffer": [],
         "activeTasks": {},
+        "taskSubjects": {},
         "activePlanning": None,
         "lastWorklogTime": int(time.time()),
     }
 
-    # Detect issue from branch name
-    branch_issue = _detect_issue_from_branch(root, cfg)
-    if branch_issue:
-        session["currentIssue"] = branch_issue
-        session["activeIssues"][branch_issue] = {
-            "startTime": int(time.time()),
-            "totalSeconds": 0,
-            "paused": False,
-        }
-        claimed = _claim_null_chunks(session, branch_issue)
-        if claimed > 0:
-            debug_log(
-                f"branch detection retroactively claimed {claimed} null chunks for {branch_issue}",
-                category="session-start",
-                enabled=cfg.get("debugLog", False),
-            )
-        debug_log(
-            f"Detected issue from branch: {branch_issue}",
-            category="session-start",
-            enabled=cfg.get("debugLog", False),
-        )
-    elif _resolve_autonomy(session, cfg) == "A" and cfg.get("autoCreate", False):
-        # Autonomy A + autoCreate: try to seed currentIssue from recent commits
-        commit_msgs = _get_recent_commit_messages(root)
-        if commit_msgs:
-            save_session(root, session)  # save skeleton first so _attempt_auto_create can read it
-            result = _attempt_auto_create(root, commit_msgs[0], session, cfg)
-            if result and not result.get("duplicate"):
-                debug_log(
-                    f"Session start auto-created {result['key']} from commit: {commit_msgs[0]!r}",
-                    category="session-start",
-                    enabled=cfg.get("debugLog", False),
-                )
-                return  # session already saved by _attempt_auto_create
 
-    save_session(root, session)
-    debug_log(
-        "Session initialized",
-        category="session-start",
-        enabled=cfg.get("debugLog", False),
-        root=root,
-        sessionId=session_id,
-    )
+def _ensure_session_structure(session):
+    """Fill missing keys with defaults. Additive only."""
+    defaults = _new_session()
+    for key, value in defaults.items():
+        if key not in session:
+            session[key] = value
+    return session
 
 
-TOOL_TYPE_MAP = {
-    "Edit": "file_edit",
-    "Write": "file_write",
-    "MultiEdit": "file_edit",
-    "NotebookEdit": "file_edit",
-    "Bash": "bash",
-    "Task": "agent",
-}
-
-# Patterns to redact from logged bash commands
-_SENSITIVE_PATTERNS = [
-    # API tokens (Atlassian format: ATATT3x...)
-    (re.compile(r'ATATT[A-Za-z0-9+/=_-]{20,}'), '[REDACTED_TOKEN]'),
-    # Generic Bearer/Basic auth headers
-    (re.compile(r'(Authorization:\s*(?:Basic|Bearer)\s+)\S+'), r'\1[REDACTED]'),
-    # -u user:token patterns
-    (re.compile(r'(-u\s+\S+:)\S+'), r'\1[REDACTED]'),
-    # printf of email:token for base64
-    (re.compile(r'(printf\s+["\'])[^"\']*[:@][^"\']*(["\'])'), r'\1[REDACTED]\2'),
-    # apiToken values in JSON
-    (re.compile(r'("apiToken"\s*:\s*")[^"]+(")', re.IGNORECASE), r'\1[REDACTED]\2'),
-]
+def load_session(root):
+    """Load session state, ensuring all required fields exist."""
+    path = os.path.join(root, ".claude", "jira-session.json")
+    session = _load_json(path)
+    if session:
+        session = _ensure_session_structure(session)
+    return session
 
 
-def _sanitize_command(command: str) -> str:
-    """Remove credentials, tokens, and secrets from bash command strings."""
-    if not command:
-        return command
-    for pattern, replacement in _SENSITIVE_PATTERNS:
-        command = pattern.sub(replacement, command)
-    return command
+def save_session(root, session):
+    """Save session state atomically."""
+    path = os.path.join(root, ".claude", "jira-session.json")
+    atomic_write_json(path, session)
 
 
+# ── CLI Dispatcher (stub — expanded in later tasks) ────────
 
-def _sanitize_session_commands(session: dict):
-    """Retroactively sanitize commands in workChunks and activityBuffer."""
+
+def main():
+    if len(sys.argv) < 2:
+        print(json.dumps({"error": "Usage: jira_core.py <command> [args...]"}))
+        sys.exit(1)
+
+    commands = {
+        "session-start": cmd_session_start,
+        "log-activity": cmd_log_activity,
+        "drain-buffer": cmd_drain_buffer,
+        "session-end": cmd_session_end,
+        "post-worklogs": cmd_post_worklogs,
+        "pre-tool-use": cmd_pre_tool_use,
+        "user-prompt-submit": cmd_user_prompt_submit,
+        "classify-issue": cmd_classify_issue,
+        "auto-create-issue": cmd_auto_create_issue,
+        "suggest-parent": cmd_suggest_parent,
+        "build-worklog": cmd_build_worklog,
+        "create-issue": cmd_create_issue,
+        "get-issue": cmd_get_issue,
+        "add-worklog": cmd_add_worklog,
+        "get-projects": cmd_get_projects,
+        "debug-log": cmd_debug_log,
+    }
+
+    cmd = sys.argv[1]
+    if cmd not in commands:
+        print(json.dumps({"error": f"Unknown command: {cmd}"}))
+        sys.exit(1)
+
+    commands[cmd]()
+
+
+# ── Idle Threshold ─────────────────────────────────────────
+
+
+def _get_idle_threshold(cfg):
+    """Get idle threshold in seconds, scaled by accuracy."""
+    base_minutes = cfg.get("idleThreshold", 15)
+    accuracy = cfg.get("accuracy", 5)
+    if accuracy >= 8:
+        minutes = max(base_minutes / 3, 5)
+    elif accuracy <= 3:
+        minutes = base_minutes * 2
+    else:
+        minutes = base_minutes
+    return int(minutes * 60)
+
+
+# ── Issue Classification ──────────────────────────────────
+
+
+def classify_issue(summary, context=None):
+    """Classify a summary as Bug or Task with confidence.
+
+    Returns: {type: "Bug"|"Task", confidence: float, signals: list[str]}
+    """
+    lower = summary.lower()
+    bug_score = 0
+    task_score = 0
+    signals = []
+
+    for signal in BUG_SIGNALS:
+        if signal in lower:
+            bug_score += 1
+            signals.append(signal)
+
+    for signal in TASK_SIGNALS:
+        if signal in lower:
+            task_score += 1
+            signals.append(signal)
+
+    # Context boosts
+    if context:
+        if context.get("new_files_created", 0) == 0 and context.get("files_edited", 0) > 0:
+            bug_score += 1
+        if context.get("new_files_created", 0) > 0:
+            task_score += 1
+
+    # Classification per spec 6.2
+    if bug_score >= 2 or (bug_score > task_score and bug_score >= 1):
+        issue_type = "Bug"
+        score = bug_score
+    else:
+        issue_type = "Task"
+        score = max(task_score, 1)
+
+    confidence = min(0.5 + score * 0.15, 0.95)
+
+    return {
+        "type": issue_type,
+        "confidence": confidence,
+        "signals": signals,
+    }
+
+
+# ── Time Formatting ───────────────────────────────────────
+
+
+def format_jira_time(seconds):
+    """Format seconds into Jira time notation (e.g. '1h 30m').
+
+    Minimum is '1m'. Zero seconds returns '1m'.
+    """
+    if seconds <= 0:
+        return "1m"
+    total_minutes = math.ceil(seconds / 60)
+    if total_minutes < 1:
+        total_minutes = 1
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    return " ".join(parts) if parts else "1m"
+
+
+def _round_seconds(seconds, rounding_minutes, accuracy=5):
+    """Round seconds up based on accuracy level.
+
+    High accuracy (8+): granularity = max(rounding_minutes/15, 1) minutes
+    Low accuracy (1-3): granularity = rounding_minutes * 2
+    Mid (4-7): granularity = rounding_minutes
+    Always round UP. Minimum one increment.
+    """
+    if accuracy >= 8:
+        granularity_minutes = max(rounding_minutes / 15, 1)
+    elif accuracy <= 3:
+        granularity_minutes = rounding_minutes * 2
+    else:
+        granularity_minutes = rounding_minutes
+
+    granularity_seconds = int(granularity_minutes * 60)
+    if granularity_seconds <= 0:
+        granularity_seconds = 60
+
+    rounded = math.ceil(seconds / granularity_seconds) * granularity_seconds
+    # Minimum one increment
+    if rounded < granularity_seconds:
+        rounded = granularity_seconds
+    return rounded
+
+
+# ── Worklog Building ──────────────────────────────────────
+
+
+def build_worklog(root, issue_key):
+    """Build a worklog entry from work chunks for a given issue.
+
+    Returns: {issueKey, seconds, summary, rawFacts, [capped], logLanguage}
+    """
+    session = load_session(root)
+    cfg = load_config(root)
+
+    chunks = []
+    sole_active = len(session.get("activeIssues", {})) <= 1
+
     for chunk in session.get("workChunks", []):
-        for activity in chunk.get("activities", []):
-            if activity.get("command"):
-                activity["command"] = _sanitize_command(activity["command"])
-    for activity in session.get("activityBuffer", []):
-        if activity.get("command"):
-            activity["command"] = _sanitize_command(activity["command"])
+        if chunk.get("issueKey") == issue_key:
+            chunks.append(chunk)
+        elif chunk.get("issueKey") is None and sole_active:
+            # Include null chunks when this is the sole active issue
+            chunks.append(chunk)
+
+    # Aggregate data
+    all_files = []
+    all_commands = []
+    total_activities = 0
+    total_seconds = 0
+
+    for chunk in chunks:
+        start = chunk.get("startTime", 0)
+        end = chunk.get("endTime", 0)
+        idle_gaps = chunk.get("idleGaps", [])
+        idle_time = sum(g.get("seconds", 0) for g in idle_gaps)
+        chunk_seconds = max(0, end - start - idle_time)
+        total_seconds += chunk_seconds
+
+        for f in chunk.get("filesChanged", []):
+            if f not in all_files:
+                all_files.append(f)
+
+        for act in chunk.get("activities", []):
+            total_activities += 1
+            cmd = act.get("command", "")
+            if cmd and cmd not in all_commands:
+                all_commands.append(sanitize_for_log(cmd))
+
+    capped = False
+    if total_seconds > MAX_WORKLOG_SECONDS:
+        total_seconds = MAX_WORKLOG_SECONDS
+        capped = True
+
+    # Build summary from file basenames
+    basenames = list(dict.fromkeys(os.path.basename(f) for f in all_files))
+    if basenames:
+        if len(basenames) <= 8:
+            summary = "Worked on " + ", ".join(basenames)
+        else:
+            shown = basenames[:8]
+            summary = "Worked on " + ", ".join(shown) + f" +{len(basenames) - 8} more"
+    else:
+        summary = "Work on task"
+
+    result = {
+        "issueKey": issue_key,
+        "seconds": total_seconds,
+        "summary": summary,
+        "rawFacts": {
+            "files": all_files,
+            "commands": all_commands,
+            "activityCount": total_activities,
+        },
+        "logLanguage": cfg.get("logLanguage", "English"),
+    }
+    if capped:
+        result["capped"] = True
+
+    return result
 
 
-def cmd_log_activity(args):
-    root = args[0] if args else "."
-    tool_json_str = args[1] if len(args) > 1 else "{}"
+# ── Command Implementations ───────────────────────────────
+
+
+def cmd_session_start():
+    """SessionStart hook handler."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    cfg = load_config(root)
+
+    # If plugin is disabled, return silently
+    if cfg.get("enabled") is False:
+        return
+
+    # If no config exists, return silently
+    if not cfg:
+        return
+
+    session = load_session(root)
+
+    if session:
+        # Existing session — sync config values, prune stale, ensure structure
+        session = _ensure_session_structure(session)
+        if "autonomyLevel" in cfg:
+            session["autonomyLevel"] = cfg["autonomyLevel"]
+        if "accuracy" in cfg:
+            session["accuracy"] = cfg["accuracy"]
+
+        # Prune stale issues (>24h old, zero totalSeconds)
+        now = int(time.time())
+        active = session.get("activeIssues", {})
+        to_prune = []
+        for key, issue in active.items():
+            age = now - issue.get("startTime", now)
+            if age > STALE_ISSUE_SECONDS and issue.get("totalSeconds", 0) == 0:
+                to_prune.append(key)
+        for key in to_prune:
+            del active[key]
+            if session.get("currentIssue") == key:
+                session["currentIssue"] = None
+
+        save_session(root, session)
+    else:
+        # New session
+        session = _new_session()
+        if "autonomyLevel" in cfg:
+            session["autonomyLevel"] = cfg["autonomyLevel"]
+        if "accuracy" in cfg:
+            session["accuracy"] = cfg["accuracy"]
+
+        # Detect issue from git branch
+        branch_pattern = cfg.get("branchPattern")
+        if branch_pattern:
+            try:
+                branch = subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                ).decode().strip()
+                match = re.search(branch_pattern, branch)
+                if match:
+                    issue_key = match.group(1)
+                    session["currentIssue"] = issue_key
+                    if issue_key not in session["activeIssues"]:
+                        session["activeIssues"][issue_key] = {
+                            "summary": f"From branch: {branch}",
+                            "startTime": int(time.time()),
+                            "totalSeconds": 0,
+                            "paused": False,
+                        }
+            except (subprocess.CalledProcessError, OSError, IndexError):
+                pass
+
+        save_session(root, session)
+
+    debug_log(f"session-start: session={session.get('sessionId')}", root)
+
+
+def cmd_log_activity():
+    """PostToolUse hook handler — log tool activity to buffer."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    cfg = load_config(root)
+
+    # If disabled, skip
+    if cfg.get("enabled") is False:
+        return
 
     session = load_session(root)
     if not session:
         return
 
+    if session.get("disabled"):
+        return
+
+    # Read tool JSON from stdin
     try:
-        tool_data = json.loads(tool_json_str)
-    except json.JSONDecodeError:
+        raw = sys.stdin.read()
+        if not isinstance(raw, str):
+            # Fallback for mock environments
+            raw = sys.stdin.__class__.read()
+        tool_data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError, TypeError):
         return
 
     tool_name = tool_data.get("tool_name", "")
     tool_input = tool_data.get("tool_input", {})
-    tool_response = tool_data.get("tool_response", {})
-    if not isinstance(tool_response, dict):
-        tool_response = {}
-
-    cfg = load_config(root)
-
-    # Planning Skill — track before the read-only skip so timing is captured.
-    if tool_name == "Skill" and _is_planning_skill(tool_input.get("skill", "")):
-        _handle_planning_event(root, session, tool_name, tool_input, tool_response, cfg)
-        save_session(root, session)
-        return  # Skill itself is still read-only; don't log to activity buffer
 
     # Skip read-only tools
     if tool_name in READ_ONLY_TOOLS:
-        debug_log(f"Skipping read-only tool={tool_name}",
-                  category="log-activity", enabled=cfg.get("debugLog", False))
         return
-    activity_type = TOOL_TYPE_MAP.get(tool_name, "other")
-    file_path = tool_input.get("file_path", "")
-    command = tool_input.get("command", "")
 
-    # Skip writes to internal plugin state/config files — these are noise,
-    # not user work, and may contain sensitive paths or credential data
+    # Extract file path
+    file_path = (
+        tool_input.get("file_path", "")
+        or tool_input.get("path", "")
+        or tool_input.get("pattern", "")
+    )
+
+    # Skip .claude/ directory writes
     if file_path and "/.claude/" in file_path:
-        debug_log(f"Skipping internal .claude/ write tool={tool_name} file={file_path}",
-                  category="log-activity", enabled=cfg.get("debugLog", False))
         return
+
+    # Determine activity type
+    if tool_name in ("Edit", "MultiEdit"):
+        activity_type = "file_edit"
+    elif tool_name == "Write":
+        activity_type = "file_write"
+    elif tool_name == "Bash":
+        activity_type = "bash"
+    else:
+        activity_type = "other"
+
+    # Build command (for Bash tools)
+    command = ""
+    if tool_name == "Bash":
+        command = sanitize_for_log(tool_input.get("command", ""))
 
     activity = {
         "timestamp": int(time.time()),
@@ -1072,329 +567,35 @@ def cmd_log_activity(args):
         "type": activity_type,
         "issueKey": session.get("currentIssue"),
         "file": file_path,
+        "command": command,
     }
-    if command:
-        activity["command"] = _sanitize_command(command)
 
-    buffer = session.get("activityBuffer", [])
-    buffer.append(activity)
-    session["activityBuffer"] = buffer
-
-    # Track plan mode start/end and implementation-triggered plan end
-    if tool_name in ("EnterPlanMode", "ExitPlanMode") or \
-            (tool_name in PLANNING_IMPL_TOOLS and session.get("activePlanning")):
-        _handle_planning_event(root, session, tool_name, tool_input, tool_response, cfg)
-
-    # Track task start/completion for per-task time logging
-    if tool_name in ("TaskCreate", "TaskUpdate"):
-        _handle_task_event(root, session, tool_name, tool_input, tool_response, cfg)
-
+    session["activityBuffer"].append(activity)
     save_session(root, session)
 
-    debug_log(
-        f"tool={tool_name} file={file_path}",
-        category="log-activity",
-        enabled=cfg.get("debugLog", False),
-        issueKey=session.get("currentIssue", ""),
-    )
+    debug_log(f"log-activity: tool={tool_name} file={file_path}", root)
 
 
-
-def _log_task_time(root: str, session: dict, cfg: dict, subject: str, seconds: int):
-    """Log time for a completed task to the parent issue."""
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    current_issue = session.get("currentIssue")
-    debug = cfg.get("debugLog", False)
-    if not (base_url and email and api_token):
-        return
-    if current_issue:
-        enriched = _maybe_enrich_worklog_summary(
-            root, {"files": [], "commands": [], "activityCount": 0}, subject)
-        post_worklog_to_jira(base_url, email, api_token, current_issue, seconds, enriched)
-        debug_log(
-            f"task='{subject}' logged={seconds}s to {current_issue}",
-            category="task-worklog",
-            enabled=debug,
-        )
-
-
-def _handle_task_event(root: str, session: dict, tool_name: str,
-                        tool_input: dict, tool_response: dict, cfg: dict):
-    """Track task start/completion for per-task time logging."""
-    resp = tool_response if isinstance(tool_response, dict) else {}
-    task_id = str(resp.get("taskId") or tool_input.get("taskId", ""))
-    # Subject can come from response (TaskCreate) or input (TaskUpdate)
-    subject = resp.get("subject", "") or tool_input.get("subject", "")
-    status = resp.get("status", "") or tool_input.get("status", "")
-    if not task_id:
-        return
-    debug = cfg.get("debugLog", False)
-    active_tasks = session.setdefault("activeTasks", {})
-    task_subjects = session.setdefault("taskSubjects", {})
-
-    # Cache subject from TaskCreate so TaskUpdate can look it up
-    if tool_name == "TaskCreate" and task_id and subject:
-        task_subjects[task_id] = subject
-
-    # For TaskUpdate, look up cached subject if none provided
-    if not subject and task_id in task_subjects:
-        subject = task_subjects[task_id]
-
-    if not status:
-        return
-    if status == "in_progress" and task_id not in active_tasks:
-        active_tasks[task_id] = {
-            "subject": subject,
-            "startTime": int(time.time()),
-            "jiraKey": None,
-        }
-        debug_log(f"Task started taskId={task_id} subject={subject!r}",
-                  category="task-worklog", enabled=debug)
-    elif status == "completed" and task_id in active_tasks:
-        task = active_tasks.pop(task_id)
-        elapsed = int(time.time()) - task["startTime"]
-        if elapsed < 60:
-            debug_log(f"Task discarded (elapsed={elapsed}s < 60s) "
-                      f"taskId={task_id} subject={task.get('subject', '')!r}",
-                      category="task-worklog", enabled=debug)
-        else:
-            _log_task_time(root, session, cfg, task.get("subject") or subject, elapsed)
-
-
-def _is_planning_skill(skill_name: str) -> bool:
-    """Return True if the skill name matches a planning/research pattern."""
-    lower = skill_name.lower()
-    return any(p in lower for p in PLANNING_SKILL_PATTERNS)
-
-
-def _log_planning_time(root: str, session: dict, cfg: dict,
-                        subject: str, seconds: int, issue_key: "str | None" = None):
-    """Log planning time to the target Jira issue."""
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
-    # Fall back: planning issue → current issue → last parent
-    target = issue_key or session.get("currentIssue") or session.get("lastParentKey")
-    debug = cfg.get("debugLog", False)
-    if not (base_url and email and api_token) or not target:
-        debug_log(f"planning time skipped — no creds or target issue",
-                  category="planning", enabled=debug)
-        return
-    enriched = _maybe_enrich_worklog_summary(
-        root, {"files": [], "commands": [], "activityCount": 0}, subject)
-    post_worklog_to_jira(base_url, email, api_token, target, seconds, enriched)
-    debug_log(f"planning='{subject}' logged={seconds}s to {target}",
-              category="planning", enabled=debug)
-
-
-def _handle_planning_event(root: str, session: dict, tool_name: str,
-                            tool_input: dict, tool_response: dict, cfg: dict):
-    """Track plan mode / planning-skill start and end for Jira time logging."""
-    active = session.get("activePlanning")
-    is_start = tool_name in ("EnterPlanMode",) or \
-               (tool_name == "Skill" and _is_planning_skill(tool_input.get("skill", "")))
-    is_end = tool_name in ("ExitPlanMode",) or tool_name in PLANNING_IMPL_TOOLS
-
-    debug = cfg.get("debugLog", False)
-    if is_start and not active:
-        skill_name = tool_input.get("skill", "")
-        subject = f"Planning: {skill_name}" if skill_name else "Planning"
-        session["activePlanning"] = {
-            "startTime": int(time.time()),
-            "issueKey": session.get("currentIssue"),
-            "subject": subject,
-        }
-        debug_log(f"Planning started subject={subject!r} trigger={tool_name}",
-                  category="planning", enabled=debug)
-    elif is_end and active:
-        elapsed = int(time.time()) - active["startTime"]
-        session["activePlanning"] = None
-        if elapsed < 60:
-            debug_log(f"Planning discarded (elapsed={elapsed}s < 60s) "
-                      f"subject={active.get('subject', '')!r}",
-                      category="planning", enabled=debug)
-            return
-        _log_planning_time(
-            root, session, cfg,
-            active.get("subject", "Planning"),
-            elapsed,
-            active.get("issueKey"),
-        )
-
-
-def _get_idle_threshold_seconds(cfg: dict) -> int:
-    """Get idle threshold in seconds, scaled by accuracy."""
-    accuracy = cfg.get("accuracy", 5)
-    base = cfg.get("idleThreshold", 15)
-    # High accuracy (8-10) → shorter threshold; low (1-3) → longer
-    if accuracy >= 8:
-        minutes = max(base // 3, 5)
-    elif accuracy <= 3:
-        minutes = base * 2
-    else:
-        minutes = base
-    return minutes * 60
-
-
-def _get_dir_cluster(file_path: str, depth: int = 2) -> str:
-    """Extract directory cluster from file path up to given depth."""
-    if not file_path:
-        return ""
-    parts = file_path.replace("\\", "/").split("/")
-    # Return up to `depth` directory components
-    dirs = [p for p in parts[:-1] if p]  # exclude filename
-    return "/".join(dirs[:depth]) if dirs else ""
-
-
-def _detect_context_switch(prev_activities: list, curr_activities: list,
-                           accuracy: int) -> bool:
-    """Check if file directory clusters shifted between two groups."""
-    if not prev_activities or not curr_activities:
-        return False
-
-    prev_dirs = Counter(
-        _get_dir_cluster(a.get("file", ""))
-        for a in prev_activities if a.get("file")
-    )
-    curr_dirs = Counter(
-        _get_dir_cluster(a.get("file", ""))
-        for a in curr_activities if a.get("file")
-    )
-    if not prev_dirs or not curr_dirs:
-        return False
-
-    # Check overlap: if most common dirs differ, it's a switch
-    prev_top = set(d for d, _ in prev_dirs.most_common(2))
-    curr_top = set(d for d, _ in curr_dirs.most_common(2))
-    overlap = prev_top & curr_top
-
-    # High accuracy → any cluster change flags; low → need complete shift
-    if accuracy >= 8:
-        return len(overlap) == 0
-    elif accuracy >= 4:
-        return len(overlap) == 0 and len(prev_top) > 0 and len(curr_top) > 0
-    else:
-        # Low accuracy: only flag if completely different and enough activities
-        return (len(overlap) == 0 and len(prev_activities) >= 3
-                and len(curr_activities) >= 3)
-
-
-def _flush_periodic_worklogs(root: str, session: dict, cfg: dict):
-    """Post a worklog for each active issue if worklogInterval minutes have elapsed."""
-    interval_minutes = cfg.get("worklogInterval", 15)
-    interval_seconds = interval_minutes * 60
-    now = int(time.time())
-    last = session.get("lastWorklogTime", now)
-    debug = cfg.get("debugLog", False)
-
-    if now - last < interval_seconds:
-        return
-
-    autonomy = session.get("autonomyLevel", cfg.get("autonomyLevel", "C"))
-    accuracy = session.get("accuracy", cfg.get("accuracy", 5))
-    time_rounding = cfg.get("timeRounding", 15)
-    active_issues = session.get("activeIssues", {})
-
-    flushed_any = False
-
-    # --- Flush attributed (issued) work ---
-    for issue_key in list(active_issues.keys()):
-        worklog = build_worklog(root, issue_key)
-        raw_seconds = worklog["seconds"]
-        if raw_seconds <= 0:
-            continue
-
-        rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
-        summary = _maybe_enrich_worklog_summary(root, worklog["rawFacts"], worklog["summary"])
-        entry = {
-            "issueKey": issue_key,
-            "seconds": rounded,
-            "summary": summary,
-            "rawFacts": worklog["rawFacts"],
-            "status": "pending" if autonomy == "C" else "approved",
-        }
-        session.setdefault("pendingWorklogs", []).append(entry)
-        flushed_any = True
-
-        debug_log(
-            f"periodic flush issue={issue_key} raw={raw_seconds}s rounded={rounded}s "
-            f"autonomy={autonomy} interval={interval_minutes}m",
-            category="periodic-worklog", enabled=debug,
-        )
-
-    # --- Flush unattributed (null-issueKey) work ---
-    null_chunks = [c for c in session.get("workChunks", []) if c.get("issueKey") is None]
-    if null_chunks:
-        unattr = _build_unattributed_worklog(session)
-        if unattr["seconds"] > 0:
-            if autonomy == "A" and cfg.get("autoCreate", False):
-                commit_msgs = _get_recent_commit_messages(root)
-                summary_hint = commit_msgs[0] if commit_msgs else unattr["summary"]
-                result = _attempt_auto_create(root, summary_hint, session, cfg)
-                if result:
-                    flushed_any = True
-                    debug_log(
-                        f"periodic auto-created {result['key']} for unattributed work",
-                        category="periodic-worklog", enabled=debug,
-                    )
-            if not flushed_any or autonomy != "A":
-                # B/C or auto-create failed: save as pending
-                rounded = _round_seconds(unattr["seconds"], time_rounding, accuracy)
-                entry = {
-                    "issueKey": None,
-                    "seconds": rounded,
-                    "summary": unattr["summary"],
-                    "rawFacts": unattr["rawFacts"],
-                    "status": "unattributed",
-                }
-                session.setdefault("pendingWorklogs", []).append(entry)
-                flushed_any = True
-                debug_log(
-                    f"periodic saved {rounded}s unattributed",
-                    category="periodic-worklog", enabled=debug,
-                )
-
-    if not flushed_any:
-        return
-
-    # Clear chunks that were just summarised so session-end doesn't re-sum them
-    processed_keys = set(active_issues.keys())
-    session["workChunks"] = [
-        c for c in session.get("workChunks", [])
-        if c.get("issueKey") not in processed_keys
-        and c.get("issueKey") is not None  # also clear null chunks that were flushed
-    ]
-    session["lastWorklogTime"] = now
-    save_session(root, session)
-
-    # Post immediately for autonomy A/B; autonomy C stays pending until /jira-approve
-    if autonomy != "C":
-        cmd_post_worklogs([root])
-
-
-def cmd_drain_buffer(args):
-    root = args[0] if args else "."
+def cmd_drain_buffer():
+    """Stop hook handler — drain activity buffer into work chunks."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
     cfg = load_config(root)
     session = load_session(root)
+
     if not session:
         return
 
     buffer = session.get("activityBuffer", [])
     if not buffer:
-        # Buffer is empty but periodic flush may still be due
-        _flush_periodic_worklogs(root, session, cfg)
+        save_session(root, session)
         return
 
-    idle_threshold = _get_idle_threshold_seconds(cfg)
-    accuracy = cfg.get("accuracy", 5)
-    chunks = session.get("workChunks", [])
-
-    # Sort buffer by timestamp
+    # Sort by timestamp
     buffer.sort(key=lambda a: a.get("timestamp", 0))
 
-    # Split buffer into groups on: idle gaps, issue key changes, dir cluster shifts
+    idle_threshold = _get_idle_threshold(cfg)
+
+    # Split into groups by idle gaps and issue key changes
     groups = []
     current_group = [buffer[0]]
 
@@ -1404,586 +605,578 @@ def cmd_drain_buffer(args):
         gap = curr.get("timestamp", 0) - prev.get("timestamp", 0)
         issue_changed = curr.get("issueKey") != prev.get("issueKey")
 
-        # Detect directory cluster shift
-        dir_shift = False
-        prev_dir = _get_dir_cluster(prev.get("file", ""))
-        curr_dir = _get_dir_cluster(curr.get("file", ""))
-        if prev_dir and curr_dir and prev_dir != curr_dir:
-            # Check if there's been a sustained shift (look back at recent group)
-            recent_dirs = Counter(
-                _get_dir_cluster(a.get("file", ""))
-                for a in current_group if a.get("file")
-            )
-            if curr_dir not in recent_dirs and len(current_group) >= 2:
-                dir_shift = True
-
-        if gap > idle_threshold or issue_changed or dir_shift:
-            groups.append({
-                "activities": current_group,
-                "idle_before": gap > idle_threshold,
-                "idle_gap_seconds": gap if gap > idle_threshold else 0,
-                "dir_shift": dir_shift,
-            })
+        if gap > idle_threshold or issue_changed:
+            groups.append(current_group)
             current_group = [curr]
         else:
             current_group.append(curr)
 
-    # Don't forget the last group
-    groups.append({
-        "activities": current_group,
-        "idle_before": False,
-        "idle_gap_seconds": 0,
-        "dir_shift": False,
-    })
+    groups.append(current_group)
 
     # Convert groups to work chunks
-    for idx, group in enumerate(groups):
-        activities = group["activities"]
-        if not activities:
+    new_chunks = []
+    for group in groups:
+        if not group:
             continue
 
-        start_time = activities[0].get("timestamp", 0)
-        end_time = activities[-1].get("timestamp", 0)
-        files_changed = list({
-            a.get("file", "") for a in activities if a.get("file")
-        })
-        issue_key = activities[0].get("issueKey")
+        start_time = group[0].get("timestamp", 0)
+        end_time = group[-1].get("timestamp", 0)
+        issue_key = group[0].get("issueKey")
 
-        idle_gaps = []
-        if group["idle_before"] and group["idle_gap_seconds"] > 0:
-            idle_gaps.append({
-                "startTime": start_time - group["idle_gap_seconds"],
-                "endTime": start_time,
-                "seconds": group["idle_gap_seconds"],
-            })
+        # Collect unique files
+        files_changed = []
+        for act in group:
+            f = act.get("file", "")
+            if f and f not in files_changed:
+                files_changed.append(f)
 
-        # Check for context switch: either the dir_shift flag or heuristic
-        needs_attribution = group.get("dir_shift", False)
-        if not needs_attribution and idx > 0:
-            prev_activities = groups[idx - 1]["activities"]
-            needs_attribution = _detect_context_switch(
-                prev_activities, activities, accuracy
-            )
-
-        chunk_id = f"chunk-{int(time.time())}-{idx}"
         chunk = {
-            "id": chunk_id,
+            "id": f"chunk-{start_time}-{len(new_chunks)}",
             "issueKey": issue_key,
             "startTime": start_time,
             "endTime": end_time,
-            "activities": activities,
+            "activities": group,
             "filesChanged": files_changed,
-            "idleGaps": idle_gaps,
-            "needsAttribution": needs_attribution,
+            "idleGaps": [],
+            "needsAttribution": issue_key is None,
         }
-        chunks.append(chunk)
+        new_chunks.append(chunk)
 
-    session["workChunks"] = chunks
+    session["workChunks"].extend(new_chunks)
     session["activityBuffer"] = []
     save_session(root, session)
 
-    idle_splits = sum(1 for g in groups if g.get("idle_before"))
-    issue_splits = sum(
-        1 for i in range(1, len(groups))
-        if (groups[i]["activities"][0].get("issueKey") !=
-            groups[i - 1]["activities"][-1].get("issueKey"))
-    )
-    dir_splits = sum(1 for g in groups if g.get("dir_shift"))
-    debug_log(
-        f"new_chunks={len(groups)} total_chunks={len(chunks)} "
-        f"splits(idle={idle_splits} issue_change={issue_splits} dir_shift={dir_splits})",
-        category="drain-buffer",
-        enabled=cfg.get("debugLog", False),
-    )
-
-    # Periodic worklog flush (every worklogInterval minutes)
-    _flush_periodic_worklogs(root, session, cfg)
-
-    # Output context switch info for Claude
-    flagged = [c for c in chunks if c.get("needsAttribution")]
-    if flagged:
-        for c in flagged:
-            files = ", ".join(c.get("filesChanged", [])[:5])
-            print(f"[jira-autopilot] Context switch detected. "
-                  f"Files: {files} → unattributed (issueKey={c['issueKey']})")
+    debug_log(f"drain-buffer: created {len(new_chunks)} chunks from {len(buffer)} activities", root)
 
 
-def classify_issue(summary: str, context: dict = None) -> dict:
-    """Classify issue as Bug or Task from summary text and optional context."""
-    lower = summary.lower()
-    bug_score = sum(1 for s in BUG_SIGNALS if s in lower)
-    task_score = sum(1 for s in TASK_SIGNALS if s in lower)
+def cmd_session_end():
+    """Finalize session: build worklogs, post to Jira, archive."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
 
-    if context:
-        if context.get("new_files_created", 0) == 0 and context.get("files_edited", 0) > 0:
-            bug_score += 1
-        if context.get("new_files_created", 0) > 0:
-            task_score += 1
-
-    if bug_score >= 2 or (bug_score > task_score and bug_score >= 1):
-        confidence = min(0.5 + bug_score * 0.15, 0.95)
-        return {
-            "type": "Bug",
-            "confidence": confidence,
-            "signals": [s for s in BUG_SIGNALS if s in lower],
-        }
-
-    confidence = min(0.5 + task_score * 0.15, 0.95)
-    return {
-        "type": "Task",
-        "confidence": confidence,
-        "signals": [s for s in TASK_SIGNALS if s in lower],
-    }
-
-
-def cmd_classify_issue(args):
-    summary = args[0] if args else ""
-    context_json = args[1] if len(args) > 1 else None
-    context = json.loads(context_json) if context_json else None
-    result = classify_issue(summary, context)
-    print(json.dumps(result))
-
-
-def build_worklog(root: str, issue_key: str) -> dict:
-    """Build worklog summary from work chunks for an issue."""
-    session = load_session(root)
-    active_keys = set(session.get("activeIssues", {}).keys())
-    sole_active = len(active_keys) == 1 and issue_key in active_keys
-    chunks = [
-        c for c in session.get("workChunks", [])
-        if c.get("issueKey") == issue_key
-        or (sole_active and c.get("issueKey") is None)
-    ]
-
-    all_files = []
-    all_commands = []
-    total_activities = 0
-    total_seconds = 0
-
-    for chunk in chunks:
-        all_files.extend(chunk.get("filesChanged", []))
-        for act in chunk.get("activities", []):
-            total_activities += 1
-            if act.get("command"):
-                all_commands.append(_sanitize_command(act["command"]))
-
-        start = chunk.get("startTime", 0)
-        end = chunk.get("endTime", 0)
-        chunk_time = end - start
-        # Subtract idle gaps
-        for gap in chunk.get("idleGaps", []):
-            chunk_time -= gap.get("seconds", 0)
-        total_seconds += max(chunk_time, 0)
-
-    # Deduplicate files; keep relative basenames for readability
-    unique_files = list(dict.fromkeys(all_files))
-    unique_commands = list(dict.fromkeys(all_commands))
-    file_basenames = [os.path.basename(f) for f in unique_files if f]
-
-    # Build a clean file-list summary (no commands, no "N tool calls").
-    # This is the auto-generated fallback used for periodic/autonomy-A posts.
-    # For /jira-stop, Claude replaces this with a human-narrative summary
-    # in the configured logLanguage.
-    if file_basenames:
-        shown = file_basenames[:8]
-        rest = len(file_basenames) - len(shown)
-        file_list = ", ".join(shown)
-        if rest:
-            file_list += f" +{rest}"
-        summary = file_list
-    else:
-        lang = get_log_language(root)
-        summary = "עבודה על המשימה" if lang == "Hebrew" else "Work on task"
-
-    capped = False
-    if total_seconds > MAX_WORKLOG_SECONDS:
-        total_seconds = MAX_WORKLOG_SECONDS
-        capped = True
-
-    result = {
-        "issueKey": issue_key,
-        "seconds": total_seconds,
-        "summary": summary,
-        "rawFacts": {
-            "files": unique_files,
-            "commands": unique_commands,
-            "activityCount": total_activities,
-        },
-    }
-    if capped:
-        result["capped"] = True
-    return result
-
-
-
-def _build_unattributed_worklog(session: dict) -> dict:
-    """Build a worklog summary from all null-issueKey work chunks.
-
-    Used at session-end and periodic flush to rescue unattributed work.
-    """
-    chunks = [c for c in session.get("workChunks", []) if c.get("issueKey") is None]
-    all_files, all_commands, total_activities, total_seconds = [], [], 0, 0
-    for chunk in chunks:
-        all_files.extend(chunk.get("filesChanged", []))
-        for act in chunk.get("activities", []):
-            total_activities += 1
-            if act.get("command"):
-                all_commands.append(_sanitize_command(act["command"]))
-        start = chunk.get("startTime", 0)
-        end = chunk.get("endTime", 0)
-        chunk_time = end - start
-        for gap in chunk.get("idleGaps", []):
-            chunk_time -= gap.get("seconds", 0)
-        total_seconds += max(chunk_time, 0)
-    unique_files = list(dict.fromkeys(all_files))
-    file_basenames = [os.path.basename(f) for f in unique_files if f]
-    if file_basenames:
-        shown = file_basenames[:8]
-        rest = len(file_basenames) - len(shown)
-        summary = ", ".join(shown) + (f" +{rest}" if rest else "")
-    else:
-        summary = "Unattributed work"
-    return {
-        "seconds": total_seconds,
-        "summary": summary,
-        "rawFacts": {
-            "files": unique_files,
-            "commands": list(dict.fromkeys(all_commands)),
-            "activityCount": total_activities,
-        },
-        "chunkCount": len(chunks),
-    }
-
-def cmd_build_worklog(args):
-    root = args[0] if args else "."
-    issue_key = args[1] if len(args) > 1 else ""
-    if not issue_key:
-        print("{}", file=sys.stderr)
-        return
-    result = build_worklog(root, issue_key)
-    result["logLanguage"] = get_log_language(root)
-    print(json.dumps(result))
-
-
-def _round_seconds(seconds: int, rounding_minutes: int, accuracy: int) -> int:
-    """Round seconds to rounding_minutes increments, scaled by accuracy."""
-    if seconds <= 0:
-        return 0
-    # High accuracy → finer rounding
-    if accuracy >= 8:
-        rounding = max(rounding_minutes // 15, 1)  # 1-min granularity
-    elif accuracy <= 3:
-        rounding = rounding_minutes * 2
-    else:
-        rounding = rounding_minutes
-    rounding_secs = rounding * 60
-    return max(math.ceil(seconds / rounding_secs) * rounding_secs, rounding_secs)
-
-
-def cmd_session_end(args):
-    root = args[0] if args else "."
-    cfg = load_config(root)
     session = load_session(root)
     if not session:
         return
 
-    autonomy = session.get("autonomyLevel", cfg.get("autonomyLevel", "C"))
-    accuracy = session.get("accuracy", cfg.get("accuracy", 5))
-    time_rounding = cfg.get("timeRounding", 15)
-    debug = cfg.get("debugLog", False)
+    cfg = load_config(root)
 
-    # Flush any in-progress planning session before archiving
-    active_planning = session.get("activePlanning")
-    if active_planning:
-        elapsed = int(time.time()) - active_planning["startTime"]
-        if elapsed >= 60:
-            _log_planning_time(
-                root, session, cfg,
-                active_planning.get("subject", "Planning"),
-                elapsed,
-                active_planning.get("issueKey"),
-            )
-        session["activePlanning"] = None
-
-    # Drain any remaining activity buffer first
-    buffer = session.get("activityBuffer", [])
-    if buffer:
-        cmd_drain_buffer(args)
-        session = load_session(root)
-
-    pending = session.get("pendingWorklogs", [])
-    active_issues = session.get("activeIssues", {})
-
-    for issue_key, issue_data in active_issues.items():
-        worklog = build_worklog(root, issue_key)
-        raw_seconds = worklog["seconds"]
-
-        if raw_seconds <= 0:
-            debug_log(
-                f"issue={issue_key} skipped — no tracked activity (build_worklog returned 0s)",
-                category="session-end", enabled=debug,
-            )
-            continue
-
-        rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
-        summary = _maybe_enrich_worklog_summary(root, worklog["rawFacts"], worklog["summary"])
-
-        entry = {
-            "issueKey": issue_key,
-            "seconds": rounded,
-            "summary": summary,
-            "rawFacts": worklog["rawFacts"],
-            "status": "pending" if autonomy == "C" else "approved",
-        }
-        pending.append(entry)
-
-        debug_log(
-            f"issue={issue_key} raw={raw_seconds}s rounded={rounded}s "
-            f"autonomy={autonomy}",
-            category="session-end",
-            enabled=debug,
-        )
-
-    session["pendingWorklogs"] = pending
-
-    # Prune paused ghost issues: paused with no logged seconds and no work chunks.
-    # These accumulate when issues are added via /jira-start but never worked on.
-    ghost_keys = [
-        key for key, data in active_issues.items()
-        if data.get("paused", False)
-        and data.get("totalSeconds", 0) == 0
-        and not any(c.get("issueKey") == key for c in session.get("workChunks", []))
-        and not any(w.get("issueKey") == key for w in pending if w.get("seconds", 0) > 0)
-    ]
-    for key in ghost_keys:
-        del session["activeIssues"][key]
-        debug_log(
-            f"Pruned ghost issue {key} (paused, no activity)",
-            category="session-end", enabled=debug,
-        )
-
-    # ── Rescue unattributed (null-issueKey) work ─────────────────────────────
-    null_chunks = [c for c in session.get("workChunks", []) if c.get("issueKey") is None]
-    if null_chunks:
-        unattr = _build_unattributed_worklog(session)
-        raw_seconds = unattr["seconds"]
-        debug_log(
-            f"unattributed chunks={len(null_chunks)} raw={raw_seconds}s",
-            category="session-end", enabled=debug,
-        )
-        if raw_seconds > 0:
-            autonomy = _resolve_autonomy(session, cfg)
-            if autonomy == "A" and cfg.get("autoCreate", False):
-                commit_msgs = _get_recent_commit_messages(root)
-                summary_hint = commit_msgs[0] if commit_msgs else unattr["summary"]
-                result = _attempt_auto_create(root, summary_hint, session, cfg)
-                if result and not result.get("duplicate"):
-                    debug_log(
-                        f"session-end auto-created {result['key']} for {raw_seconds}s unattributed",
-                        category="session-end", enabled=debug,
-                    )
-                    session = load_session(root)  # reload since _attempt_auto_create saved
-                else:
-                    # Auto-create failed or was disabled — fall back to pending
-                    rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
-                    entry = {
-                        "issueKey": None,
-                        "seconds": rounded,
-                        "summary": unattr["summary"],
-                        "rawFacts": unattr["rawFacts"],
-                        "status": "unattributed",
-                    }
-                    session.setdefault("pendingWorklogs", []).append(entry)
-            else:
-                # B/C: save as pending unattributed for /jira-approve
-                rounded = _round_seconds(raw_seconds, time_rounding, accuracy)
-                entry = {
-                    "issueKey": None,
-                    "seconds": rounded,
-                    "summary": unattr["summary"],
-                    "rawFacts": unattr["rawFacts"],
-                    "status": "unattributed",
-                }
-                session.setdefault("pendingWorklogs", []).append(entry)
-                debug_log(
-                    f"session-end saved {rounded}s as pendingUnattributed",
-                    category="session-end", enabled=debug,
-                )
-
-        # Archive the full session snapshot BEFORE clearing chunks — preserves
-    # complete work history for /jira-summary and other tooling that reads archives.
-    archive_dir = os.path.join(root, ".claude", "jira-sessions")
-    os.makedirs(archive_dir, exist_ok=True)
-    session_id = session.get("sessionId", datetime.now().strftime("%Y%m%d-%H%M%S"))
-    archive_path = os.path.join(archive_dir, f"{session_id}.json")
-    with open(archive_path, "w") as f:
-        json.dump(session, f, indent=2)
-
-    # Clear processed work chunks from the live session so the next session-end
-    # doesn't re-sum them and post duplicate Jira worklogs.
-    processed_keys = set(active_issues.keys())
-    session["workChunks"] = [
-        c for c in session.get("workChunks", [])
-        if c.get("issueKey") not in processed_keys
-    ]
-    now = int(time.time())
-    for issue_key in processed_keys:
-        if issue_key in session.get("activeIssues", {}):
-            session["activeIssues"][issue_key]["startTime"] = now
-
+    # Save session state first (local-first principle)
     save_session(root, session)
 
-    debug_log(
-        f"Session ended, archived to {archive_path}",
-        category="session-end",
-        enabled=debug,
-    )
+    active_issues = session.get("activeIssues", {})
+    work_chunks = session.get("workChunks", [])
 
-
-def _text_to_adf(text: str) -> dict:
-    """Convert plain text to Atlassian Document Format."""
-    paragraphs = []
-    for line in text.split("\n"):
-        if line.strip():
-            paragraphs.append(
-                {"type": "paragraph", "content": [{"type": "text", "text": line}]}
-            )
-        # Skip blank lines — empty paragraph nodes render as blank description in Jira
-    if not paragraphs:
-        paragraphs.append(
-            {"type": "paragraph", "content": [{"type": "text", "text": text or "—"}]}
-        )
-    return {"version": 1, "type": "doc", "content": paragraphs}
-
-
-def post_worklog_to_jira(base_url: str, email: str, api_token: str,
-                          issue_key: str, seconds: int, comment: str,
-                          language: str = "English") -> bool:
-    """POST a worklog entry to Jira Cloud REST API. Returns True on success."""
-    url = f"{base_url.rstrip('/')}/rest/api/3/issue/{issue_key}/worklog"
-    auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-    # Fallback description when caller provides no subject (e.g. empty task name)
-    if not comment.strip():
-        minutes = seconds // 60
-        effective_comment = f"עבודה על המשימה ({minutes} דקות)" if language == "Hebrew" else f"Work on task ({minutes}m)"
-    else:
-        effective_comment = comment.strip()
-    payload = json.dumps({
-        "timeSpentSeconds": seconds,
-        "comment": _text_to_adf(effective_comment),
-    }).encode()
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    api_path = f"/rest/api/3/issue/{issue_key}/worklog"
-    start_ts = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            elapsed_ms = int((time.time() - start_ts) * 1000)
-            _log_api_call("POST", api_path, resp.status, elapsed_ms,
-                          f"issue={issue_key} seconds={seconds}")
-            return resp.status in (200, 201)
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", api_path, e.code, elapsed_ms,
-                      f"issue={issue_key} error={e.reason}")
-        debug_log(f"post_worklog HTTP error status={e.code} reason={e.reason} "
-                  f"issue={issue_key} seconds={seconds}",
-                  category="jira-api")
-        return False
-    except Exception as e:
-        elapsed_ms = int((time.time() - start_ts) * 1000)
-        _log_api_call("POST", api_path, 0, elapsed_ms,
-                      f"issue={issue_key} error={type(e).__name__}")
-        debug_log(f"post_worklog error={type(e).__name__}: {e} "
-                  f"issue={issue_key} seconds={seconds}",
-                  category="jira-api")
-        return False
-
-
-def cmd_post_worklogs(args):
-    """Post all 'approved' pendingWorklogs to Jira, then mark them 'posted'."""
-    root = args[0] if args else "."
-    cfg = load_config(root)
-    session = load_session(root)
-    if not session:
+    # If no active issues, just archive
+    if not active_issues:
+        _archive_session(root, session)
         return
 
-    debug = cfg.get("debugLog", False)
+    # Build and post worklogs for each active issue with work
+    for issue_key, issue_data in active_issues.items():
+        total_seconds = issue_data.get("totalSeconds", 0)
 
-    base_url = get_cred(root, "baseUrl")
-    email = get_cred(root, "email")
-    api_token = get_cred(root, "apiToken")
+        # Calculate time from work chunks if totalSeconds is 0
+        if total_seconds <= 0:
+            for chunk in work_chunks:
+                if chunk.get("issueKey") == issue_key:
+                    start = chunk.get("startTime", 0)
+                    end = chunk.get("endTime", 0)
+                    total_seconds += max(end - start, 0)
 
-    if not (base_url and email and api_token):
-        debug_log("No credentials — skipping worklog posting", category="post-worklogs", enabled=debug)
+        if total_seconds <= 0:
+            continue
+
+        # Cap at max worklog seconds
+        total_seconds = min(total_seconds, MAX_WORKLOG_SECONDS)
+
+        # Build comment
+        comment = _build_worklog_comment(issue_key, work_chunks)
+
+        # Post worklog
+        try:
+            add_worklog(root, issue_key, total_seconds, comment=comment)
+        except Exception:
+            # On failure, save as pending worklog
+            session.setdefault("pendingWorklogs", []).append({
+                "issueKey": issue_key,
+                "seconds": total_seconds,
+                "comment": comment,
+                "timestamp": int(time.time()),
+            })
+
+    # Save session with any pending worklogs
+    save_session(root, session)
+
+    # Archive the session
+    _archive_session(root, session)
+
+
+def cmd_post_worklogs():
+    """Post pending worklogs from session state to Jira."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"error": "No active session"}))
         return
 
     pending = session.get("pendingWorklogs", [])
-    posted_any = False
-    lang = get_log_language(root)
+    if not pending:
+        print(json.dumps({"posted": 0, "remaining": 0}))
+        return
 
-    for entry in pending:
-        if entry.get("status") != "approved":
-            continue
-        issue_key = entry.get("issueKey", "")
-        seconds = entry.get("seconds", 0)
-        summary = entry.get("summary", "")
+    posted = 0
+    failed = []
+
+    for worklog in pending:
+        issue_key = worklog.get("issueKey", "")
+        seconds = worklog.get("seconds", 0)
+        comment = worklog.get("comment", "")
+
         if not issue_key or seconds <= 0:
             continue
 
-        # Rebuild summary from rawFacts if missing (e.g. older entries before summary was stored)
-        if not summary.strip():
-            raw_facts = entry.get("rawFacts", {})
-            files = raw_facts.get("files", [])
-            basenames = [os.path.basename(f) for f in files if f]
-            if basenames:
-                shown = basenames[:8]
-                rest = len(basenames) - len(shown)
-                summary = ", ".join(shown) + (f" +{rest}" if rest else "")
+        try:
+            result = add_worklog(root, issue_key, seconds, comment=comment)
+            if result and "error" not in result:
+                posted += 1
+            else:
+                failed.append(worklog)
+        except Exception:
+            failed.append(worklog)
 
-        ok = post_worklog_to_jira(base_url, email, api_token, issue_key, seconds, summary, language=lang)
-        entry["status"] = "posted" if ok else "failed"
-        posted_any = True
-        debug_log(
-            f"issue={issue_key} seconds={seconds} status={entry['status']}",
-            category="post-worklogs",
-            enabled=debug,
-        )
-        if ok:
-            print(f"[jira-autopilot] Logged {seconds//60}m to {issue_key}", flush=True)
+    session["pendingWorklogs"] = failed
+    save_session(root, session)
 
-    if posted_any:
-        save_session(root, session)
+    print(json.dumps({"posted": posted, "remaining": len(failed)}))
+    debug_log(f"post-worklogs: posted={posted} remaining={len(failed)}", root)
 
 
-def suggest_parent(root: str, summary: str) -> dict:
-    """Suggest parent issues from session history and local config."""
+def cmd_pre_tool_use():
+    """PreToolUse hook: inject issue key into git commit messages."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    # Read hook input from stdin
+    try:
+        raw = sys.stdin.read()
+        hook_input = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    tool_name = hook_input.get("tool_name", "")
+    tool_input = hook_input.get("tool_input", {})
+
+    # Only activate for Bash tool
+    if tool_name != "Bash":
+        return
+
+    command = tool_input.get("command", "")
+
+    # Only activate for git commit commands
+    if "git commit" not in command:
+        return
+
+    # Load session to get current issue
     session = load_session(root)
-    local = load_local_config(root)
+    if not session:
+        return
 
+    current_issue = session.get("currentIssue")
+    if not current_issue:
+        return
+
+    # Check if the issue key is already in the commit message
+    if current_issue in command:
+        return
+
+    # Emit systemMessage suggesting the issue key
+    result = {
+        "systemMessage": f"Include the Jira issue key '{current_issue}' in the commit message. "
+                         f"Prefix the commit message with '{current_issue}: ' if not already present.",
+    }
+    print(json.dumps(result))
+
+
+def cmd_user_prompt_submit():
+    """UserPromptSubmit hook: output statusline with active issue and elapsed time."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        return
+
+    current = session.get("currentIssue")
+    if not current:
+        return
+
+    active_issues = session.get("activeIssues", {})
+    issue_data = active_issues.get(current)
+    if not issue_data:
+        return
+
+    # Calculate elapsed time since issue startTime
+    start_time = issue_data.get("startTime", 0)
+    if start_time <= 0:
+        return
+
+    elapsed = int(time.time()) - start_time
+    if elapsed < 0:
+        elapsed = 0
+
+    # Format as "Xh Ym"
+    hours = elapsed // 3600
+    minutes = (elapsed % 3600) // 60
+    if hours > 0:
+        time_str = f"{hours}h {minutes:02d}m"
+    else:
+        time_str = f"{minutes}m"
+
+    statusline = {"iconLabel": f"{current} \u23f1 {time_str}"}
+    print(json.dumps(statusline))
+
+
+def cmd_classify_issue():
+    """CLI wrapper for classify_issue — prints JSON to stdout."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    summary = sys.argv[3] if len(sys.argv) > 3 else ""
+    result = classify_issue(summary)
+    print(json.dumps(result))
+
+
+def cmd_auto_create_issue():
+    """CLI wrapper for _attempt_auto_create()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    description = sys.argv[3] if len(sys.argv) > 3 else ""
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"error": "No active session"}))
+        return
+
+    cfg = load_config(root)
+    result = _attempt_auto_create(root, description, session, cfg)
+    print(json.dumps(result or {}))
+
+
+def cmd_suggest_parent():
+    """Suggest a parent issue for a new sub-task."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    session = load_session(root)
+    if not session:
+        print(json.dumps({"parentKey": None}))
+        return
+
+    # First check lastParentKey in session
     last_parent = session.get("lastParentKey")
-    recent_parents = local.get("recentParents", [])
+    if last_parent:
+        print(json.dumps({"parentKey": last_parent, "source": "session"}))
+        return
 
-    recent = [{"key": k} for k in recent_parents]
+    # Fall back to activeIssues keys
+    active_issues = session.get("activeIssues", {})
+    if active_issues:
+        # Use the current issue if set, otherwise first active issue
+        current = session.get("currentIssue")
+        if current and current in active_issues:
+            print(json.dumps({"parentKey": current, "source": "session"}))
+            return
+        first_key = next(iter(active_issues))
+        print(json.dumps({"parentKey": first_key, "source": "session"}))
+        return
 
-    # Contextual search would require Jira API credentials.
-    # Return empty contextual list — Claude fills via MCP instead.
-    contextual = []
+    print(json.dumps({"parentKey": None}))
 
+
+def cmd_build_worklog():
+    """CLI wrapper for build_worklog — prints JSON to stdout."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    issue_key = sys.argv[3] if len(sys.argv) > 3 else None
+    if not issue_key:
+        print(json.dumps({"error": "Missing issue key"}))
+        return
+    result = build_worklog(root, issue_key)
+    print(json.dumps(result))
+
+
+def cmd_create_issue():
+    """CLI wrapper for create_issue()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    data = json.loads(sys.stdin.read())
+    result = create_issue(
+        root,
+        project_key=data.get("projectKey", ""),
+        summary=data.get("summary", ""),
+        issue_type=data.get("issueType", "Task"),
+        description=data.get("description", ""),
+    )
+    print(json.dumps(result))
+
+
+def cmd_get_issue():
+    """CLI wrapper for get_issue()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    issue_key = sys.argv[3] if len(sys.argv) > 3 else ""
+    result = get_issue(root, issue_key)
+    print(json.dumps(result))
+
+
+def cmd_add_worklog():
+    """CLI wrapper for add_worklog()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    data = json.loads(sys.stdin.read())
+    result = add_worklog(
+        root,
+        issue_key=data.get("issueKey", ""),
+        seconds=data.get("seconds", 0),
+        comment=data.get("comment", ""),
+    )
+    print(json.dumps(result))
+
+
+def cmd_get_projects():
+    """CLI wrapper for jira_get_projects()."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    result = jira_get_projects(root)
+    print(json.dumps(result))
+
+
+def cmd_debug_log():
+    """CLI wrapper for debug_log — log a message from the command line."""
+    root = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    # Message from argv or stdin
+    if len(sys.argv) > 3:
+        message = " ".join(sys.argv[3:])
+    else:
+        message = sys.stdin.read().strip()
+
+    if message:
+        debug_log(message, root)
+
+
+# ── ADF Helpers ───────────────────────────────────────────
+
+
+def _text_to_adf(text):
+    """Convert plain text to Atlassian Document Format (ADF)."""
     return {
-        "sessionDefault": last_parent,
-        "contextual": contextual,
-        "recent": recent,
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": text},
+                ],
+            },
+        ],
     }
 
 
-def cmd_suggest_parent(args):
-    root = args[0] if args else "."
-    summary = args[1] if len(args) > 1 else ""
-    result = suggest_parent(root, summary)
-    print(json.dumps(result))
+# ── Jira REST API Client ─────────────────────────────────
+
+
+def jira_request(root, method, path, body=None, max_retries=3):
+    """Authenticated HTTP request to Jira REST API.
+
+    Returns parsed JSON response dict. On error returns {"error": ...}.
+    Retries on 429 (rate limited) with backoff.
+    """
+    base_url = get_cred(root, "baseUrl").rstrip("/")
+    email = get_cred(root, "email")
+    api_token = get_cred(root, "apiToken")
+
+    url = base_url + path
+    auth_str = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+
+    for attempt in range(max_retries):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Basic {auth_str}")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_data = resp.read()
+                if resp_data:
+                    return json.loads(resp_data)
+                return {}
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < max_retries - 1:
+                retry_after = 1
+                try:
+                    retry_after = int(e.headers.get("Retry-After", "1"))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+                time.sleep(retry_after)
+                continue
+            api_log(f"HTTP {e.code} {method} {path}")
+            return {"error": f"HTTP {e.code}: {e.msg}"}
+        except (urllib.error.URLError, OSError) as e:
+            api_log(f"Network error {method} {path}: {e}")
+            return {"error": str(e)}
+
+    return {"error": "Max retries exceeded"}
+
+
+def jira_get_projects(root):
+    """Fetch all Jira projects with pagination. Returns list of {key, name}."""
+    projects = []
+    start_at = 0
+    max_results = 50
+
+    while True:
+        try:
+            result = jira_request(
+                root, "GET",
+                f"/rest/api/3/project/search?startAt={start_at}&maxResults={max_results}",
+            )
+        except Exception:
+            return []
+
+        if not result or "error" in result:
+            if not projects:
+                return []
+            break
+
+        values = result.get("values", [])
+        for p in values:
+            projects.append({"key": p["key"], "name": p["name"]})
+
+        if result.get("isLast", True):
+            break
+
+        start_at += len(values)
+        if not values:
+            break
+
+    return projects
+
+
+def create_issue(root, project_key, summary, issue_type="Task", description="", parent_key=None):
+    """Create a Jira issue. Returns API response dict with 'key' on success."""
+    fields = {
+        "project": {"key": project_key},
+        "summary": summary,
+        "issuetype": {"name": issue_type},
+    }
+
+    if description:
+        fields["description"] = _text_to_adf(description)
+
+    if parent_key:
+        fields["parent"] = {"key": parent_key}
+
+    body = {"fields": fields}
+    return jira_request(root, "POST", "/rest/api/3/issue", body=body)
+
+
+def add_worklog(root, issue_key, seconds, comment=""):
+    """Post a worklog entry to a Jira issue."""
+    body = {
+        "timeSpentSeconds": seconds,
+    }
+
+    if comment:
+        body["comment"] = _text_to_adf(comment)
+
+    return jira_request(root, "POST", f"/rest/api/3/issue/{issue_key}/worklog", body=body)
+
+
+def get_issue(root, issue_key):
+    """Fetch issue details from Jira."""
+    return jira_request(root, "GET", f"/rest/api/3/issue/{issue_key}")
+
+
+# ── Auto Issue Creation ───────────────────────────────────
+
+
+def _attempt_auto_create(root, description, session, cfg):
+    """Attempt to automatically create a Jira issue.
+
+    Returns dict with key/type/parent on success, None or {} on skip.
+    Respects autonomy level and autoCreate config flag.
+    """
+    autonomy = session.get("autonomyLevel", "C")
+    auto_create = cfg.get("autoCreate", False)
+    project_key = cfg.get("projectKey", "")
+
+    # Cautious mode never auto-creates
+    if autonomy == "C":
+        return None
+
+    # If autoCreate is disabled, don't create
+    if not auto_create:
+        return None
+
+    # No project key means monitoring mode
+    if not project_key:
+        return None
+
+    # Classify the issue
+    classification = classify_issue(description)
+    issue_type = classification["type"]
+
+    # Get parent key from session context
+    parent_key = session.get("lastParentKey")
+
+    # Create the issue
+    result = create_issue(
+        root,
+        project_key=project_key,
+        summary=description,
+        issue_type=issue_type,
+        parent_key=parent_key,
+    )
+
+    if not result or "error" in result:
+        return result
+
+    # Return enriched result
+    result["type"] = issue_type
+    if parent_key:
+        result["parent"] = parent_key
+
+    return result
+
+
+# ── Session End Helpers ───────────────────────────────────
+
+
+def _build_worklog_comment(issue_key, work_chunks):
+    """Build a summary comment from work chunks for an issue."""
+    chunks = [c for c in work_chunks if c.get("issueKey") == issue_key]
+    if not chunks:
+        return "Work session"
+
+    all_files = set()
+    all_tools = set()
+    for chunk in chunks:
+        for f in chunk.get("files", chunk.get("filesChanged", [])):
+            all_files.add(f)
+        for act in chunk.get("activities", []):
+            all_tools.add(act.get("tool", ""))
+
+    parts = ["Work session:"]
+    if all_files:
+        parts.append(f"Files: {', '.join(sorted(all_files)[:5])}")
+    if all_tools:
+        parts.append(f"Tools: {', '.join(sorted(all_tools))}")
+
+    return " ".join(parts)
+
+
+def _archive_session(root, session):
+    """Archive session to .claude/jira-sessions/<sessionId>.json."""
+    session_id = session.get("sessionId", time.strftime("%Y%m%d-%H%M%S"))
+    archive_dir = os.path.join(root, ".claude", "jira-sessions")
+    os.makedirs(archive_dir, exist_ok=True)
+    archive_path = os.path.join(archive_dir, f"{session_id}.json")
+    atomic_write_json(archive_path, session)
 
 
 if __name__ == "__main__":
