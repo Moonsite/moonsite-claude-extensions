@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -71,6 +71,23 @@
         "rtl",
         "docx",
         "umbraco"
+      ]
+    },
+    {
+      "name": "bump-release",
+      "source": "./skills/bump-release",
+      "description": "Bump version across all project files, commit, push, and create PR",
+      "version": "1.0.0",
+      "author": {
+        "name": "Boris Sigalov"
+      },
+      "category": "workflow",
+      "keywords": [
+        "version",
+        "bump",
+        "release",
+        "semver",
+        "publish"
       ]
     }
   ]
