@@ -33,23 +33,22 @@
     {
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
-      "description": "Proactively generates HTML from markdown in docs/ folders, captures images from Figma/Playwright, and maintains doc indexes",
-      "version": "1.0.0",
+      "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
+      "version": "2.0.0",
       "author": {
         "name": "Boris Sigalov"
       },
       "category": "documentation",
       "homepage": "https://github.com/Moonsite/moonsite-claude-extensions",
       "keywords": [
+        "markdown",
+        "html",
+        "converter",
         "documentation",
-        "specs",
-        "guides",
-        "reports",
-        "authoring",
-        "figma",
-        "playwright",
         "hebrew",
-        "rtl"
+        "rtl",
+        "toc",
+        "index"
       ]
     }
   ],
