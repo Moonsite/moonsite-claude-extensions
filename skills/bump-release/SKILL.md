@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Bump Release
 
-Detect all version files in the project, bump them to a new version, commit, push, and optionally create a PR.
+Detect all version files in the project, bump them to a new version, commit, push, create a PR if on a feature branch, and merge it.
 
 ## Workflow
 
@@ -71,12 +71,16 @@ Update each detected file with the new version using the Edit tool. Handle each 
 3. Commit with message: `Bump version to X.Y.Z`
 4. Push to the current remote branch
 
-### Step 6: Create PR (if applicable)
+### Step 6: Create PR and Merge (if applicable)
 
 Check the current branch. If it's NOT the main/default branch:
 1. Use `gh pr create` to create a pull request
-2. Title: `Release vX.Y.Z`
-3. Body: List all bumped files and old -> new versions
+   - Title: `Release vX.Y.Z`
+   - Body: List all bumped files and old -> new versions
+2. Merge the PR using `gh pr merge --merge --admin`
+   - If `--admin` fails due to permissions, try without it: `gh pr merge --merge`
+   - If merge is blocked by branch protection, inform the user and provide the PR URL
+3. After merge, switch to main and pull: `git checkout main && git pull`
 4. Return the PR URL to the user
 
 If already on main/master, skip PR creation and inform the user that the version bump has been pushed directly.
