@@ -27,11 +27,11 @@ $CLI get-session "$PROJECT_ROOT"
 ```
 
 If there is already a `currentIssue` set:
-- Show the active issue key and summary.
-- Ask the user: "You are currently tracking **{currentIssue}**. Would you like to:"
-  - **Switch** — pause the current issue and start the new one.
-  - **Stop current first** — run the stop-work flow for the current issue, then start new.
-  - **Cancel** — keep working on the current issue.
+- Look up the issue's summary from `activeIssues[currentIssue].summary`.
+- Ask the user: "You are currently tracking **{currentIssue}: {summary}**. Would you like to:"
+  - **Switch** — pause {currentIssue}: {summary} and start tracking a new/existing issue.
+  - **Stop current first** — run the stop-work flow for {currentIssue}: {summary}, then start a new issue.
+  - **Cancel** — keep working on {currentIssue}: {summary}.
 
 If the user chooses Switch, the current issue stays in `activeIssues` but is no longer `currentIssue`.
 
