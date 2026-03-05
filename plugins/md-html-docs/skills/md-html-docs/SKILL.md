@@ -12,7 +12,7 @@ Convert any markdown file to styled, self-contained HTML. Auto-detects language 
 
 The plugin includes a self-contained Python converter (`convert.py`) with zero dependencies. It:
 
-1. Parses markdown using regex (headings, bold/italic, code blocks, tables, lists, blockquotes, checkboxes, links, images, HR)
+1. Parses markdown using regex (headings, bold/italic, code blocks, tables, lists, blockquotes, checkboxes, links, images, HR, diagrams)
 2. Detects Hebrew content (>5% Hebrew characters) → uses RTL template with Heebo font
 3. English/other content → uses LTR template with Inter font
 4. Extracts title from first `# heading`, subtitle from next heading/blockquote/paragraph
@@ -53,3 +53,4 @@ Use `/md-html-docs-convert` with a path:
 - **Commit `.md` and `.html` together** — never commit one without the other
 - **Images**: reference with relative paths in markdown, e.g. `![alt](images/screenshot.png)`
 - **Templates are auto-selected** — Hebrew content gets RTL, everything else gets LTR
+- **Diagram blocks** (`mermaid`, `pintora`, `dot`, `graphviz`, `nomnoml`) render as interactive SVGs via client-side libraries

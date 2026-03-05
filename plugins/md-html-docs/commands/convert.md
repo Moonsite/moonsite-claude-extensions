@@ -28,5 +28,6 @@ Features:
 - Generates TOC from h2/h3 headings
 - Generates `index.html` for folders listing all documents and subfolders
 - Supports tables, code blocks, checkboxes, blockquotes, images, links
+- Renders diagram code blocks (mermaid, dot/graphviz, nomnoml) as interactive SVGs
 
 Report the output to the user after running.
