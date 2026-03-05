@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -14,7 +14,7 @@
       "name": "jira-autopilot",
       "source": "./plugins/jira-autopilot",
       "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
-      "version": "4.0.0",
+      "version": "4.0.1",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -34,7 +34,7 @@
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
       "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -50,44 +50,24 @@
         "toc",
         "index"
       ]
-    }
-  ],
-  "skills": [
-    {
-      "name": "moonsite-spec",
-      "source": "./skills/moonsite-spec",
-      "description": "Generate Word document (.docx) technical specifications in Moonsite corporate style from requirements, code, and Figma designs",
-      "version": "1.0.0",
-      "author": {
-        "name": "Boris Sigalov"
-      },
-      "category": "documentation",
-      "keywords": [
-        "spec",
-        "specification",
-        "documentation",
-        "figma",
-        "hebrew",
-        "rtl",
-        "docx",
-        "umbraco"
-      ]
     },
     {
-      "name": "bump-release",
-      "source": "./skills/bump-release",
-      "description": "Bump version across all project files, commit, push, and create PR",
-      "version": "1.0.0",
+      "name": "moonsite-skills",
+      "source": "./plugins/moonsite-skills",
+      "description": "Moonsite utility skills — version bumping, spec generation",
+      "version": "1.0.1",
       "author": {
         "name": "Boris Sigalov"
       },
       "category": "workflow",
+      "homepage": "https://github.com/Moonsite/moonsite-claude-extensions",
       "keywords": [
         "version",
         "bump",
         "release",
-        "semver",
-        "publish"
+        "spec",
+        "specification",
+        "documentation"
       ]
     }
   ]
