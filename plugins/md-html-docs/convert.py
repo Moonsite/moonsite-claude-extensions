@@ -17,6 +17,74 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# ─── Diagram support ─────────────────────────────────────────────────────────
+
+DIAGRAM_LANGUAGES = {
+    'mermaid': ['pintora'],
+    'pintora': ['pintora'],
+    'dot': ['vizjs'],
+    'graphviz': ['vizjs'],
+    'nomnoml': ['nomnoml'],
+}
+
+DIAGRAM_CSS = """\
+.diagram-block{margin:1rem 0}
+.diagram-toolbar{margin-bottom:.5rem}
+.diagram-toolbar select{font-family:inherit;font-size:.8rem;padding:.25rem .5rem;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);cursor:pointer}
+.diagram-render{min-height:40px;display:flex;justify-content:center;overflow-x:auto}
+.diagram-render svg{max-width:100%}
+.diagram-error{color:#dc2626;font-size:.875rem;padding:.5rem;background:#fef2f2;border-radius:4px}
+"""
+
+DIAGRAM_SCRIPTS = """\
+<script src="https://cdn.jsdelivr.net/npm/@pintora/standalone/lib/pintora-standalone.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@viz-js/viz/lib/viz-standalone.js"></script>
+<script src="https://unpkg.com/graphre/dist/graphre.js"></script>
+<script src="https://unpkg.com/nomnoml/dist/nomnoml.js"></script>
+<script>
+(function(){
+  var renderers={
+    pintora:function(src,el){
+      pintora.default.renderTo(src,{container:el,renderer:'svg'});
+    },
+    vizjs:function(src,el){
+      Viz.instance().then(function(viz){
+        var svg=viz.renderSVGElement(src);
+        el.appendChild(svg);
+      });
+    },
+    nomnoml:function(src,el){
+      el.textContent='';
+      var svgStr=nomnoml.renderSvg(src);
+      var parser=new DOMParser();
+      var doc=parser.parseFromString(svgStr,'image/svg+xml');
+      el.appendChild(doc.documentElement);
+    }
+  };
+  function render(block){
+    var sel=block.querySelector('select');
+    var target=block.querySelector('.diagram-render');
+    var src=block.querySelector('script[type="text/diagram"]').textContent;
+    var renderer=sel?sel.value:block.dataset.renderers;
+    target.textContent='';
+    try{
+      renderers[renderer](src,target);
+    }catch(e){
+      var errDiv=document.createElement('div');
+      errDiv.className='diagram-error';
+      errDiv.textContent='Render error: '+e.message;
+      target.appendChild(errDiv);
+    }
+  }
+  document.querySelectorAll('.diagram-block').forEach(function(block){
+    var sel=block.querySelector('select');
+    if(sel) sel.addEventListener('change',function(){render(block);});
+    render(block);
+  });
+})();
+</script>
+"""
+
 # ─── Templates ────────────────────────────────────────────────────────────────
 
 LTR_TEMPLATE = """\
@@ -62,6 +130,7 @@ hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
 img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 .footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
 @media(max-width:768px){.page{grid-template-columns:1fr}.sidebar{display:none}.content{padding:1.5rem}}
+{{DIAGRAM_CSS}}
 </style>
 </head>
 <body>
@@ -80,6 +149,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <div class="footer">Generated: {{GENERATION_DATE}}</div>
 </main>
 </div>
+{{DIAGRAM_SCRIPTS}}
 </body>
 </html>
 """
@@ -127,6 +197,7 @@ hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
 img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 .footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
 @media(max-width:768px){.page{grid-template-columns:1fr}.sidebar{display:none}.content{padding:1.5rem}}
+{{DIAGRAM_CSS}}
 </style>
 </head>
 <body>
@@ -145,6 +216,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 {{TOC}}
 </nav>
 </div>
+{{DIAGRAM_SCRIPTS}}
 </body>
 </html>
 """
@@ -289,9 +361,26 @@ def md_to_html(md: str) -> tuple:
         # Code blocks
         if re.match(r'^```', line):
             if in_code_block:
-                escaped = html.escape('\n'.join(code_lines))
-                cls = f' class="language-{code_lang}"' if code_lang else ''
-                out.append(f'<pre><code{cls}>{escaped}</code></pre>')
+                if code_lang.lower() in DIAGRAM_LANGUAGES:
+                    raw_source = '\n'.join(code_lines)
+                    lang_lower = code_lang.lower()
+                    compat = DIAGRAM_LANGUAGES[lang_lower]
+                    renderers_str = ','.join(compat)
+                    toolbar = ''
+                    if len(compat) > 1:
+                        opts = ''.join(f'<option value="{r}">{r}</option>' for r in compat)
+                        toolbar = f'<div class="diagram-toolbar"><select>{opts}</select></div>'
+                    out.append(
+                        f'<div class="diagram-block" data-lang="{html.escape(lang_lower)}" data-renderers="{html.escape(renderers_str)}">'
+                        f'<script type="text/diagram">{raw_source}</script>'
+                        f'{toolbar}'
+                        f'<div class="diagram-render"></div>'
+                        f'</div>'
+                    )
+                else:
+                    escaped = html.escape('\n'.join(code_lines))
+                    cls = f' class="language-{code_lang}"' if code_lang else ''
+                    out.append(f'<pre><code{cls}>{escaped}</code></pre>')
                 in_code_block = False
                 code_lines = []
                 code_lang = ''
@@ -474,12 +563,15 @@ def convert_file(md_path: str) -> str:
 
     template = RTL_TEMPLATE if is_hebrew(md_text) else LTR_TEMPLATE
 
+    has_diagrams = 'class="diagram-block"' in content_html
     final = (template
              .replace('{{TITLE}}', html.escape(title))
              .replace('{{SUBTITLE}}', html.escape(subtitle))
              .replace('{{TOC}}', toc_html)
              .replace('{{CONTENT}}', content_html)
-             .replace('{{GENERATION_DATE}}', gen_date))
+             .replace('{{GENERATION_DATE}}', gen_date)
+             .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
+             .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else ''))
 
     out_path = md_path.with_suffix('.html')
     out_path.write_text(final, encoding='utf-8')
