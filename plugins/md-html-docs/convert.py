@@ -115,15 +115,20 @@ document.querySelectorAll('.diagram-block').forEach(function(block){
 
 # ─── Config loading ──────────────────────────────────────────────────────────
 
-def load_config(start_dir):
-    """Search up from start_dir for .claude/md-html-docs.json and return config dict."""
+def load_config(start_dir, title=''):
+    """Search up from start_dir for .claude/md-html-docs.json and return config dict.
+
+    When no config file is found, uses the document title for smart defaults
+    instead of generic 'Documentation'/'Docs'.
+    """
     defaults = {
-        'projectName': 'Documentation',
+        'projectName': '',
         'orgName': '',
-        'logoText': 'Docs',
+        'logoText': '',
         'footerText': '',
     }
     d = Path(start_dir).resolve()
+    found_config = False
     while True:
         config_path = d / '.claude' / 'md-html-docs.json'
         if config_path.is_file():
@@ -134,13 +139,21 @@ def load_config(start_dir):
                 # Auto-derive logoText from projectName if not explicitly set
                 if 'logoText' not in cfg and 'projectName' in cfg:
                     result['logoText'] = cfg['projectName'][:2]
+                found_config = True
                 return result
             except (json.JSONDecodeError, OSError):
-                return defaults
+                break
         parent = d.parent
         if parent == d:
             break
         d = parent
+    # No config found — derive smart defaults from document title
+    if title:
+        defaults['projectName'] = title
+        defaults['logoText'] = title[:2]
+    else:
+        defaults['projectName'] = 'Documentation'
+        defaults['logoText'] = 'Docs'
     return defaults
 
 
@@ -167,6 +180,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
 .site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
 .header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
+.header-badge:empty,.org:empty{display:none}
 
 /* ── Layout ── */
 .page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
@@ -178,6 +192,22 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-left:2px solid transparent;margin-bottom:.15rem;border-radius:0 4px 4px 0;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
 .sidebar a.h3-link{padding-left:1.25rem;font-size:.8rem;color:var(--muted)}
+.index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
+.index-link:hover{text-decoration:underline}
+/* ── Collapsible TOC ── */
+.sidebar details{margin-bottom:.15rem}
+.sidebar details summary{list-style:none;cursor:pointer}
+.sidebar details summary::-webkit-details-marker{display:none}
+.sidebar details summary::before{content:'▸';display:inline-block;width:1em;font-size:.7em;transition:transform .15s;vertical-align:middle}
+.sidebar details[open] summary::before{transform:rotate(90deg)}
+.sidebar details summary a{display:inline}
+/* ── Layout switcher ── */
+.layout-toolbar{display:flex;gap:.4rem;justify-content:center;margin-bottom:1.5rem}
+.layout-toolbar button{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.25rem .6rem;font-size:.75rem;cursor:pointer;color:var(--muted);transition:all .15s}
+.layout-toolbar button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.layout-narrow .content{max-width:860px}
+.layout-wide .content{max-width:1100px}
+.layout-fluid .content{max-width:100%;padding-left:3rem;padding-right:3rem}
 
 /* ── Mobile TOC toggle ── */
 .toc-toggle{display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
@@ -250,6 +280,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <div class="page">
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-card">
+    <a href="index.html" class="index-link">&#128196; Index</a>
     <h3>Contents</h3>
     {{TOC}}
   </div>
@@ -259,6 +290,11 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
+</div>
+<div class="layout-toolbar">
+<button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
+<button onclick="setLayout('wide')" id="btn-wide">Wide</button>
+<button onclick="setLayout('fluid')" id="btn-fluid">Fluid</button>
 </div>
 {{CONTENT}}
 <div class="footer">
@@ -270,6 +306,17 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209;</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
+<script>
+function setLayout(mode){
+  var page=document.querySelector('.page');
+  page.classList.remove('layout-narrow','layout-wide','layout-fluid');
+  page.classList.add('layout-'+mode);
+  document.querySelectorAll('.layout-toolbar button').forEach(function(b){b.classList.remove('active')});
+  document.getElementById('btn-'+mode).classList.add('active');
+  try{localStorage.setItem('doc-layout',mode)}catch(e){}
+}
+(function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
+</script>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 mermaid.initialize({startOnLoad:true,theme:'dark'});
@@ -300,9 +347,10 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
 .site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
 .header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
+.header-badge:empty,.org:empty{display:none}
 
 /* ── Layout ── */
-.page{display:grid;grid-template-columns:1fr 280px;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
+.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
 
 /* ── Sidebar ── */
 .sidebar{position:sticky;top:0;height:calc(100vh - 70px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
@@ -311,6 +359,22 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-right:2px solid transparent;border-left:none;margin-bottom:.15rem;border-radius:4px 0 0 4px;padding-right:.75rem;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
 .sidebar a.h3-link{padding-right:1.25rem;font-size:.8rem;color:var(--muted)}
+.index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
+.index-link:hover{text-decoration:underline}
+/* ── Collapsible TOC ── */
+.sidebar details{margin-bottom:.15rem}
+.sidebar details summary{list-style:none;cursor:pointer}
+.sidebar details summary::-webkit-details-marker{display:none}
+.sidebar details summary::before{content:'◂';display:inline-block;width:1em;font-size:.7em;transition:transform .15s;vertical-align:middle}
+.sidebar details[open] summary::before{transform:rotate(-90deg)}
+.sidebar details summary a{display:inline}
+/* ── Layout switcher ── */
+.layout-toolbar{display:flex;gap:.4rem;justify-content:center;margin-bottom:1.5rem}
+.layout-toolbar button{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.25rem .6rem;font-size:.75rem;cursor:pointer;color:var(--muted);transition:all .15s}
+.layout-toolbar button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.layout-narrow .content{max-width:860px}
+.layout-wide .content{max-width:1100px}
+.layout-fluid .content{max-width:100%;padding-left:3rem;padding-right:3rem}
 
 /* ── Mobile TOC toggle ── */
 .toc-toggle{display:none;position:fixed;bottom:1.5rem;left:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
@@ -384,11 +448,23 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
   <div class="header-badge">{{BADGE_TEXT}}</div>
 </header>
 <div class="page">
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-card">
+    <a href="index.html" class="index-link">&#128196; &#1488;&#1497;&#1504;&#1491;&#1511;&#1505;</a>
+    <h3>&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</h3>
+    {{TOC}}
+  </div>
+</nav>
 <main class="content">
 <div class="doc-header">
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
+</div>
+<div class="layout-toolbar">
+<button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
+<button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
+<button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
 </div>
 {{CONTENT}}
 <div class="footer">
@@ -396,16 +472,21 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
   <span>Generated: {{GENERATION_DATE}}</span>
 </div>
 </main>
-<nav class="sidebar" id="sidebar">
-  <div class="sidebar-card">
-    <h3>&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</h3>
-    {{TOC}}
-  </div>
-</nav>
 </div>
 <button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209; &#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
+<script>
+function setLayout(mode){
+  var page=document.querySelector('.page');
+  page.classList.remove('layout-narrow','layout-wide','layout-fluid');
+  page.classList.add('layout-'+mode);
+  document.querySelectorAll('.layout-toolbar button').forEach(function(b){b.classList.remove('active')});
+  document.getElementById('btn-'+mode).classList.add('active');
+  try{localStorage.setItem('doc-layout',mode)}catch(e){}
+}
+(function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
+</script>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 mermaid.initialize({startOnLoad:true,theme:'default'});
@@ -425,11 +506,16 @@ INDEX_TEMPLATE = """\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--border:#e5e7eb;--radius:8px}
+:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
+.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
+.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
+.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
 .container{max-width:800px;margin:0 auto;padding:3rem 2rem}
-h1{font-size:2rem;font-weight:700;margin-bottom:.5rem}
+h1.page-title{font-size:2rem;font-weight:700;margin-bottom:.5rem}
 .subtitle{color:var(--muted);margin-bottom:2rem}
 .section{margin-bottom:2rem}
 .section h2{font-size:1.2rem;font-weight:600;margin-bottom:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:.85rem}
@@ -441,11 +527,19 @@ h1{font-size:2rem;font-weight:700;margin-bottom:.5rem}
 </style>
 </head>
 <body>
+<header class="site-header">
+  <div class="logo-circle">{{LOGO_TEXT}}</div>
+  <div class="header-text">
+    <h1>{{PROJECT_NAME}}</h1>
+    {{ORG_HTML}}
+  </div>
+  {{BADGE_HTML}}
+</header>
 <div class="container">
-<h1>{{TITLE}}</h1>
+<h1 class="page-title">{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 {{CONTENT}}
-<div class="footer">Generated: {{GENERATION_DATE}}</div>
+<div class="footer">{{FOOTER_TEXT}} &middot; Generated: {{GENERATION_DATE}}</div>
 </div>
 </body>
 </html>
@@ -696,6 +790,7 @@ def extract_metadata(md: str) -> tuple:
 
     Title: first # heading.
     Subtitle: first > blockquote, or next heading, or first paragraph.
+    Skips table rows (lines starting with |) to avoid picking up table content as subtitle.
     """
     title = ''
     subtitle = ''
@@ -707,6 +802,9 @@ def extract_metadata(md: str) -> tuple:
                 title = m.group(1).strip()
                 continue
         elif not subtitle:
+            # Skip table rows
+            if line.startswith('|'):
+                continue
             # Try blockquote
             m = re.match(r'^>\s*(.+)', line)
             if m:
@@ -727,13 +825,38 @@ def extract_metadata(md: str) -> tuple:
 # ─── Build TOC ────────────────────────────────────────────────────────────────
 
 def build_toc(headings: list) -> str:
-    """Build sidebar TOC HTML from headings list."""
+    """Build sidebar TOC HTML from headings list.
+
+    Groups h3+ under parent h2 using <details><summary> for collapsible sections.
+    Standalone h2s (no children) remain plain links.
+    """
     if not headings:
         return ''
-    parts = []
+    # Group headings: list of (h2_entry, [children])
+    groups = []
     for level, text, slug in headings:
-        cls = ' class="h3-link"' if level >= 3 else ''
-        parts.append(f'<a href="#{slug}"{cls}>{text}</a>')
+        if level == 2:
+            groups.append(((level, text, slug), []))
+        elif groups:
+            groups[-1][1].append((level, text, slug))
+        else:
+            # h3+ before any h2 — treat as standalone
+            groups.append(((level, text, slug), []))
+
+    parts = []
+    for (level, text, slug), children in groups:
+        if not children or level != 2:
+            cls = ' class="h3-link"' if level >= 3 else ''
+            parts.append(f'<a href="#{slug}"{cls}>{text}</a>')
+        else:
+            inner = ''.join(
+                f'<a href="#{cs}" class="h3-link">{ct}</a>'
+                for cl, ct, cs in children
+            )
+            parts.append(
+                f'<details open><summary><a href="#{slug}">{text}</a></summary>'
+                f'{inner}</details>'
+            )
     return '\n'.join(parts)
 
 
@@ -752,9 +875,11 @@ def convert_file(md_path: str) -> str:
     is_rtl = is_hebrew(md_text)
     template = RTL_TEMPLATE if is_rtl else LTR_TEMPLATE
 
-    config = load_config(md_path.parent)
+    config = load_config(md_path.parent, title=title)
 
-    badge_default = '\u05de\u05e1\u05de\u05da' if is_rtl else 'Document'
+    # Conditional badge/org HTML
+    badge_text = config.get('badgeText', '')
+    org_name = config.get('orgName', '')
 
     has_diagrams = 'class="diagram-block"' in content_html
     final = (template
@@ -764,9 +889,9 @@ def convert_file(md_path: str) -> str:
              .replace('{{CONTENT}}', content_html)
              .replace('{{GENERATION_DATE}}', gen_date)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
-             .replace('{{ORG_NAME}}', html.escape(config['orgName']))
+             .replace('{{ORG_NAME}}', html.escape(org_name) if org_name else '')
              .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
-             .replace('{{BADGE_TEXT}}', html.escape(config.get('badgeText', badge_default)))
+             .replace('{{BADGE_TEXT}}', html.escape(badge_text) if badge_text else '')
              .replace('{{FOOTER_TEXT}}', html.escape(config['footerText']))
              .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
              .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else ''))
@@ -813,11 +938,22 @@ def generate_index(folder: str) -> str:
                               f'<div class="desc">{count} document{"s" if count != 1 else ""}</div></a>\n')
         sections_html += '</div>\n'
 
+    config = load_config(str(folder), title=folder_name)
+    org_name = config.get('orgName', '')
+    badge_text = config.get('badgeText', '')
+    org_html = f'<div class="org">{html.escape(org_name)}</div>' if org_name else ''
+    badge_html = f'<div class="header-badge">{html.escape(badge_text)}</div>' if badge_text else ''
+
     final = (INDEX_TEMPLATE
              .replace('{{TITLE}}', html.escape(folder_name))
              .replace('{{SUBTITLE}}', f'{len(md_files)} documents')
              .replace('{{CONTENT}}', sections_html)
-             .replace('{{GENERATION_DATE}}', gen_date))
+             .replace('{{GENERATION_DATE}}', gen_date)
+             .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
+             .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
+             .replace('{{ORG_HTML}}', org_html)
+             .replace('{{BADGE_HTML}}', badge_html)
+             .replace('{{FOOTER_TEXT}}', html.escape(config['footerText'])))
 
     out_path = folder / 'index.html'
     out_path.write_text(final, encoding='utf-8')
