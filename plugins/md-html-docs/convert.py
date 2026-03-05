@@ -11,6 +11,7 @@ Usage:
 """
 import glob as globmod
 import html
+import json
 import os
 import re
 import sys
@@ -85,6 +86,37 @@ DIAGRAM_SCRIPTS = """\
 </script>
 """
 
+# ─── Config loading ──────────────────────────────────────────────────────────
+
+def load_config(start_dir):
+    """Search up from start_dir for .claude/md-html-docs.json and return config dict."""
+    defaults = {
+        'projectName': 'Documentation',
+        'orgName': '',
+        'logoText': 'Docs',
+        'footerText': '',
+    }
+    d = Path(start_dir).resolve()
+    while True:
+        config_path = d / '.claude' / 'md-html-docs.json'
+        if config_path.is_file():
+            try:
+                with open(config_path, encoding='utf-8') as f:
+                    cfg = json.load(f)
+                result = {**defaults, **cfg}
+                # Auto-derive logoText from projectName if not explicitly set
+                if 'logoText' not in cfg and 'projectName' in cfg:
+                    result['logoText'] = cfg['projectName'][:2]
+                return result
+            except (json.JSONDecodeError, OSError):
+                return defaults
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return defaults
+
+
 # ─── Templates ────────────────────────────────────────────────────────────────
 
 LTR_TEMPLATE = """\
@@ -96,22 +128,44 @@ LTR_TEMPLATE = """\
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
 <style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#f3f4f6;--radius:8px}
+:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#1E1E1E;--code-text:#d4d4d4;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
-.page{display:grid;grid-template-columns:260px 1fr;max-width:1200px;margin:0 auto;min-height:100vh}
-.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1.5rem;border-right:1px solid var(--border);background:var(--surface)}
-.sidebar h3{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.75rem}
-.sidebar a{display:block;padding:.35rem 0;color:var(--text);text-decoration:none;font-size:.9rem;border-left:2px solid transparent;padding-left:.75rem}
-.sidebar a:hover{color:var(--accent);border-left-color:var(--accent)}
-.content{padding:3rem 4rem;max-width:800px}
-.header{margin-bottom:2.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border)}
-.header h1{font-size:2rem;font-weight:700;margin-bottom:.5rem}
-.subtitle{color:var(--muted);font-size:1.1rem}
-.date{color:var(--muted);font-size:.85rem;margin-top:.5rem}
-h2{font-size:1.4rem;font-weight:600;margin:2rem 0 1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
-h3{font-size:1.15rem;font-weight:600;margin:1.5rem 0 .75rem}
+
+/* ── Header ── */
+.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
+.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
+.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
+.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
+
+/* ── Layout ── */
+.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
+
+/* ── Sidebar ── */
+.sidebar{position:sticky;top:0;height:calc(100vh - 70px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:1px solid var(--border)}
+.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
+.sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
+.sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-left:2px solid transparent;margin-bottom:.15rem;border-radius:0 4px 4px 0;transition:all .15s}
+.sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
+.sidebar a.h3-link{padding-left:1.25rem;font-size:.8rem;color:var(--muted)}
+
+/* ── Mobile TOC toggle ── */
+.toc-toggle{display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
+.toc-toggle:hover{transform:scale(1.1)}
+
+/* ── Content ── */
+.content{padding:2.5rem 3.5rem;max-width:860px}
+.doc-header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:2px solid var(--border)}
+.doc-header h1{font-size:2rem;font-weight:700;margin-bottom:.4rem;color:var(--text)}
+.subtitle{color:var(--muted);font-size:1.05rem}
+.date{color:var(--muted);font-size:.8rem;margin-top:.4rem}
+
+/* ── Typography ── */
+h2{font-size:1.4rem;font-weight:600;margin:2.5rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--accent-light)}
+h3{font-size:1.15rem;font-weight:600;margin:1.75rem 0 .75rem}
 h4{font-size:1rem;font-weight:600;margin:1.25rem 0 .5rem}
 p{margin-bottom:1rem}
 a{color:var(--accent)}
@@ -119,36 +173,80 @@ ul,ol{margin:0 0 1rem 1.5rem}
 li{margin-bottom:.35rem}
 li input[type="checkbox"]{margin-right:.4rem}
 blockquote{border-left:3px solid var(--accent);padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:0 var(--radius) var(--radius) 0}
-pre{background:var(--code-bg);padding:1rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.875rem}
-code{font-family:'JetBrains Mono',monospace;font-size:.875em}
-p code,li code{background:var(--code-bg);padding:.15rem .35rem;border-radius:4px}
+
+/* ── Code ── */
+pre{background:var(--code-bg);color:var(--code-text);padding:1.15rem 1.25rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.85rem;box-shadow:inset 0 1px 3px rgba(0,0,0,.2)}
+code{font-family:'JetBrains Mono',monospace;font-size:.85em}
+p code,li code{background:#e8eaed;color:#c7254e;padding:.15rem .4rem;border-radius:4px}
+pre code{background:transparent;color:inherit;padding:0}
+
+/* ── Tables ── */
 table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
 th,td{border:1px solid var(--border);padding:.6rem .8rem;text-align:left}
-th{background:var(--code-bg);font-weight:600}
-tr:nth-child(even){background:#fafafa}
+th{background:var(--accent);color:#fff;font-weight:600}
+tr:nth-child(even){background:#f5f6f8}
+
+/* ── Misc ── */
 hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
 img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
-.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
-@media(max-width:768px){.page{grid-template-columns:1fr}.sidebar{display:none}.content{padding:1.5rem}}
+.footer{margin-top:3rem;padding:1.5rem 0;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem;display:flex;justify-content:space-between;align-items:center}
+
+/* ── Print ── */
+@media print{
+  .site-header{background:var(--accent)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sidebar,.toc-toggle{display:none!important}
+  .page{grid-template-columns:1fr}
+  .content{padding:1rem;max-width:100%}
+  pre{white-space:pre-wrap;word-break:break-all}
+}
+
+/* ── Mobile ── */
+@media(max-width:768px){
+  .page{grid-template-columns:1fr}
+  .sidebar{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99;height:100vh;border:none;box-shadow:0 0 30px rgba(0,0,0,.3)}
+  .sidebar.open{display:block}
+  .toc-toggle{display:flex;align-items:center;justify-content:center}
+  .content{padding:1.5rem}
+}
 {{DIAGRAM_CSS}}
 </style>
 </head>
 <body>
+<header class="site-header">
+  <div class="logo-circle">{{LOGO_TEXT}}</div>
+  <div class="header-text">
+    <h1>{{PROJECT_NAME}}</h1>
+    <div class="org">{{ORG_NAME}}</div>
+  </div>
+  <div class="header-badge">{{BADGE_TEXT}}</div>
+</header>
 <div class="page">
-<nav class="sidebar">
-<h3>Contents</h3>
-{{TOC}}
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-card">
+    <h3>Contents</h3>
+    {{TOC}}
+  </div>
 </nav>
 <main class="content">
-<div class="header">
+<div class="doc-header">
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
 </div>
 {{CONTENT}}
-<div class="footer">Generated: {{GENERATION_DATE}}</div>
+<div class="footer">
+  <span>{{FOOTER_TEXT}}</span>
+  <span>Generated: {{GENERATION_DATE}}</span>
+</div>
 </main>
 </div>
+<button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209;</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({startOnLoad:true,theme:'dark'});
+</script>
 {{DIAGRAM_SCRIPTS}}
 </body>
 </html>
@@ -162,23 +260,45 @@ RTL_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&family=Assistant:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css">
 <style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#f3f4f6;--radius:8px}
+:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#f5f5f5;--code-text:#1a1a2e;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Heebo',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.8;direction:rtl}
-.page{display:grid;grid-template-columns:1fr 260px;max-width:1200px;margin:0 auto;min-height:100vh}
-.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1.5rem;border-right:none;border-left:1px solid var(--border);background:var(--surface)}
-.sidebar h3{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.75rem}
-.sidebar a{display:block;padding:.35rem 0;color:var(--text);text-decoration:none;font-size:.9rem;border-right:2px solid transparent;padding-right:.75rem;border-left:none}
-.sidebar a:hover{color:var(--accent);border-right-color:var(--accent)}
-.content{padding:3rem 4rem;max-width:800px}
-.header{margin-bottom:2.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border)}
-.header h1{font-size:2rem;font-weight:700;margin-bottom:.5rem}
-.subtitle{color:var(--muted);font-size:1.1rem}
-.date{color:var(--muted);font-size:.85rem;margin-top:.5rem}
-h2{font-size:1.4rem;font-weight:600;margin:2rem 0 1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
-h3{font-size:1.15rem;font-weight:600;margin:1.5rem 0 .75rem}
+body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.8;direction:rtl}
+
+/* ── Header ── */
+.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
+.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
+.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
+.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
+
+/* ── Layout ── */
+.page{display:grid;grid-template-columns:1fr 280px;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
+
+/* ── Sidebar ── */
+.sidebar{position:sticky;top:0;height:calc(100vh - 70px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
+.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
+.sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
+.sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-right:2px solid transparent;border-left:none;margin-bottom:.15rem;border-radius:4px 0 0 4px;padding-right:.75rem;transition:all .15s}
+.sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
+.sidebar a.h3-link{padding-right:1.25rem;font-size:.8rem;color:var(--muted)}
+
+/* ── Mobile TOC toggle ── */
+.toc-toggle{display:none;position:fixed;bottom:1.5rem;left:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
+.toc-toggle:hover{transform:scale(1.1)}
+
+/* ── Content ── */
+.content{padding:2.5rem 3.5rem;max-width:860px}
+.doc-header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:2px solid var(--border)}
+.doc-header h1{font-size:2rem;font-weight:700;margin-bottom:.4rem;color:var(--text)}
+.subtitle{color:var(--muted);font-size:1.05rem}
+.date{color:var(--muted);font-size:.8rem;margin-top:.4rem}
+
+/* ── Typography ── */
+h2{font-size:1.4rem;font-weight:600;margin:2.5rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--accent-light)}
+h3{font-size:1.15rem;font-weight:600;margin:1.75rem 0 .75rem}
 h4{font-size:1rem;font-weight:600;margin:1.25rem 0 .5rem}
 p{margin-bottom:1rem}
 a{color:var(--accent)}
@@ -186,36 +306,83 @@ ul,ol{margin:0 0 1rem 0;padding-right:1.5rem}
 li{margin-bottom:.35rem}
 li input[type="checkbox"]{margin-left:.4rem}
 blockquote{border-right:3px solid var(--accent);border-left:none;padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:var(--radius) 0 0 var(--radius)}
-pre{background:var(--code-bg);padding:1rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.875rem;direction:ltr;text-align:left}
-code{font-family:'JetBrains Mono',monospace;font-size:.875em;direction:ltr}
-p code,li code{background:var(--code-bg);padding:.15rem .35rem;border-radius:4px}
+
+/* ── Warning boxes ── */
+.warning-box{border-right:4px solid #f59e0b;background:#fffbeb;padding:1rem;border-radius:0 var(--radius) var(--radius) 0;margin:1rem 0}
+
+/* ── Code ── */
+pre{background:var(--code-bg);color:var(--code-text);padding:1.15rem 1.25rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.85rem;direction:ltr;text-align:left;border:1px solid var(--border)}
+code{font-family:'JetBrains Mono',monospace;font-size:.85em;direction:ltr}
+p code,li code{background:#e8eaed;color:#c7254e;padding:.15rem .4rem;border-radius:4px}
+pre code{background:transparent;color:inherit;padding:0}
+
+/* ── Tables ── */
 table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
 th,td{border:1px solid var(--border);padding:.6rem .8rem;text-align:right}
-th{background:var(--code-bg);font-weight:600}
-tr:nth-child(even){background:#fafafa}
+th{background:var(--accent);color:#fff;font-weight:600}
+tr:nth-child(even){background:#f5f6f8}
+
+/* ── Misc ── */
 hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
 img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
-.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
-@media(max-width:768px){.page{grid-template-columns:1fr}.sidebar{display:none}.content{padding:1.5rem}}
+.footer{margin-top:3rem;padding:1.5rem 0;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem;display:flex;justify-content:space-between;align-items:center}
+
+/* ── Print ── */
+@media print{
+  .site-header{background:var(--accent)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sidebar,.toc-toggle{display:none!important}
+  .page{grid-template-columns:1fr}
+  .content{padding:1rem;max-width:100%}
+  pre{white-space:pre-wrap;word-break:break-all}
+}
+
+/* ── Mobile ── */
+@media(max-width:768px){
+  .page{grid-template-columns:1fr}
+  .sidebar{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99;height:100vh;border:none;box-shadow:0 0 30px rgba(0,0,0,.3)}
+  .sidebar.open{display:block}
+  .toc-toggle{display:flex;align-items:center;justify-content:center}
+  .content{padding:1.5rem}
+}
 {{DIAGRAM_CSS}}
 </style>
 </head>
 <body>
+<header class="site-header">
+  <div class="logo-circle">{{LOGO_TEXT}}</div>
+  <div class="header-text">
+    <h1>{{PROJECT_NAME}}</h1>
+    <div class="org">{{ORG_NAME}}</div>
+  </div>
+  <div class="header-badge">{{BADGE_TEXT}}</div>
+</header>
 <div class="page">
 <main class="content">
-<div class="header">
+<div class="doc-header">
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
 </div>
 {{CONTENT}}
-<div class="footer">Generated: {{GENERATION_DATE}}</div>
+<div class="footer">
+  <span>{{FOOTER_TEXT}}</span>
+  <span>Generated: {{GENERATION_DATE}}</span>
+</div>
 </main>
-<nav class="sidebar">
-<h3>תוכן עניינים</h3>
-{{TOC}}
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-card">
+    <h3>&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</h3>
+    {{TOC}}
+  </div>
 </nav>
 </div>
+<button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209; &#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({startOnLoad:true,theme:'default'});
+</script>
 {{DIAGRAM_SCRIPTS}}
 </body>
 </html>
@@ -544,8 +711,8 @@ def build_toc(headings: list) -> str:
         return ''
     parts = []
     for level, text, slug in headings:
-        indent = '  ' * (level - 2)
-        parts.append(f'{indent}<a href="#{slug}">{text}</a>')
+        cls = ' class="h3-link"' if level >= 3 else ''
+        parts.append(f'<a href="#{slug}"{cls}>{text}</a>')
     return '\n'.join(parts)
 
 
@@ -561,7 +728,12 @@ def convert_file(md_path: str) -> str:
     toc_html = build_toc(headings)
     gen_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-    template = RTL_TEMPLATE if is_hebrew(md_text) else LTR_TEMPLATE
+    is_rtl = is_hebrew(md_text)
+    template = RTL_TEMPLATE if is_rtl else LTR_TEMPLATE
+
+    config = load_config(md_path.parent)
+
+    badge_default = '\u05de\u05e1\u05de\u05da' if is_rtl else 'Document'
 
     has_diagrams = 'class="diagram-block"' in content_html
     final = (template
@@ -570,6 +742,11 @@ def convert_file(md_path: str) -> str:
              .replace('{{TOC}}', toc_html)
              .replace('{{CONTENT}}', content_html)
              .replace('{{GENERATION_DATE}}', gen_date)
+             .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
+             .replace('{{ORG_NAME}}', html.escape(config['orgName']))
+             .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
+             .replace('{{BADGE_TEXT}}', html.escape(config.get('badgeText', badge_default)))
+             .replace('{{FOOTER_TEXT}}', html.escape(config['footerText']))
              .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
              .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else ''))
 
