@@ -20,7 +20,7 @@ from pathlib import Path
 # ─── Diagram support ─────────────────────────────────────────────────────────
 
 DIAGRAM_LANGUAGES = {
-    'mermaid': ['pintora'],
+    'mermaid': ['mermaid'],
     'pintora': ['pintora'],
     'dot': ['vizjs'],
     'graphviz': ['vizjs'],
@@ -28,60 +28,87 @@ DIAGRAM_LANGUAGES = {
 }
 
 DIAGRAM_CSS = """\
-.diagram-block{margin:1rem 0}
-.diagram-toolbar{margin-bottom:.5rem}
-.diagram-toolbar select{font-family:inherit;font-size:.8rem;padding:.25rem .5rem;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);cursor:pointer}
-.diagram-render{min-height:40px;display:flex;justify-content:center;overflow-x:auto}
-.diagram-render svg{max-width:100%}
+.diagram-block{margin:1rem 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;overflow-x:auto}
+.diagram-render{min-height:40px;display:flex;justify-content:center}
+.diagram-render svg{width:100%;height:auto;max-height:80vh}
 .diagram-error{color:#dc2626;font-size:.875rem;padding:.5rem;background:#fef2f2;border-radius:4px}
 """
 
 DIAGRAM_SCRIPTS = """\
-<script src="https://cdn.jsdelivr.net/npm/@pintora/standalone/lib/pintora-standalone.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz/lib/viz-standalone.js"></script>
 <script src="https://unpkg.com/graphre/dist/graphre.js"></script>
 <script src="https://unpkg.com/nomnoml/dist/nomnoml.js"></script>
-<script>
-(function(){
-  var renderers={
-    pintora:function(src,el){
-      pintora.default.renderTo(src,{container:el,renderer:'svg'});
-    },
-    vizjs:function(src,el){
-      Viz.instance().then(function(viz){
-        var svg=viz.renderSVGElement(src);
-        el.appendChild(svg);
-      });
-    },
-    nomnoml:function(src,el){
-      el.textContent='';
-      var svgStr=nomnoml.renderSvg(src);
-      var parser=new DOMParser();
-      var doc=parser.parseFromString(svgStr,'image/svg+xml');
-      el.appendChild(doc.documentElement);
-    }
-  };
-  function render(block){
-    var sel=block.querySelector('select');
-    var target=block.querySelector('.diagram-render');
-    var src=block.querySelector('script[type="text/diagram"]').textContent;
-    var renderer=sel?sel.value:block.dataset.renderers;
-    target.textContent='';
-    try{
-      renderers[renderer](src,target);
-    }catch(e){
+<script type="module">
+import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs';
+mermaid.registerLayoutLoaders(elkLayouts);
+mermaid.initialize({
+  startOnLoad:false,
+  look:'neo',
+  theme:'base',
+  layout:'elk',
+  themeVariables:{
+    primaryColor:'#dbeafe',
+    primaryTextColor:'#1e3a5f',
+    primaryBorderColor:'#3b82f6',
+    lineColor:'#94a3b8',
+    secondaryColor:'#f1f5f9',
+    tertiaryColor:'#eff6ff',
+    noteBkgColor:'#fef3c7',
+    noteBorderColor:'#f59e0b',
+    noteTextColor:'#92400e',
+    actorBkg:'#dbeafe',
+    actorBorder:'#3b82f6',
+    actorTextColor:'#1e3a5f',
+    signalColor:'#475569',
+    signalTextColor:'#1e293b',
+    activationBkgColor:'#eff6ff',
+    activationBorderColor:'#3b82f6',
+    fontFamily:'Inter,system-ui,sans-serif'
+  },
+  flowchart:{useMaxWidth:true,htmlLabels:true,padding:15},
+  sequence:{useMaxWidth:true,wrap:true,width:200}
+});
+var renderers={
+  mermaid:function(src,el){
+    var id='mermaid-'+Math.random().toString(36).substr(2,9);
+    mermaid.render(id,src).then(function(result){
+      el.insertAdjacentHTML('beforeend',result.svg);
+    }).catch(function(e){
       var errDiv=document.createElement('div');
       errDiv.className='diagram-error';
       errDiv.textContent='Render error: '+e.message;
-      target.appendChild(errDiv);
-    }
+      el.appendChild(errDiv);
+    });
+  },
+  vizjs:function(src,el){
+    Viz.instance().then(function(viz){
+      var svg=viz.renderSVGElement(src);
+      el.appendChild(svg);
+    });
+  },
+  nomnoml:function(src,el){
+    el.textContent='';
+    var svgStr=nomnoml.renderSvg(src);
+    var parser=new DOMParser();
+    var doc=parser.parseFromString(svgStr,'image/svg+xml');
+    el.appendChild(doc.documentElement);
   }
-  document.querySelectorAll('.diagram-block').forEach(function(block){
-    var sel=block.querySelector('select');
-    if(sel) sel.addEventListener('change',function(){render(block);});
-    render(block);
-  });
-})();
+};
+document.querySelectorAll('.diagram-block').forEach(function(block){
+  var target=block.querySelector('.diagram-render');
+  var src=block.querySelector('script[type="text/diagram"]').textContent;
+  var renderer=block.dataset.renderers;
+  target.textContent='';
+  try{
+    renderers[renderer](src,target);
+  }catch(e){
+    var errDiv=document.createElement('div');
+    errDiv.className='diagram-error';
+    errDiv.textContent='Render error: '+e.message;
+    target.appendChild(errDiv);
+  }
+});
 </script>
 """
 
@@ -364,16 +391,10 @@ def md_to_html(md: str) -> tuple:
                 if code_lang.lower() in DIAGRAM_LANGUAGES:
                     raw_source = '\n'.join(code_lines)
                     lang_lower = code_lang.lower()
-                    compat = DIAGRAM_LANGUAGES[lang_lower]
-                    renderers_str = ','.join(compat)
-                    toolbar = ''
-                    if len(compat) > 1:
-                        opts = ''.join(f'<option value="{r}">{r}</option>' for r in compat)
-                        toolbar = f'<div class="diagram-toolbar"><select>{opts}</select></div>'
+                    renderer = DIAGRAM_LANGUAGES[lang_lower][0]
                     out.append(
-                        f'<div class="diagram-block" data-lang="{html.escape(lang_lower)}" data-renderers="{html.escape(renderers_str)}">'
+                        f'<div class="diagram-block" data-lang="{html.escape(lang_lower)}" data-renderers="{html.escape(renderer)}">'
                         f'<script type="text/diagram">{raw_source}</script>'
-                        f'{toolbar}'
                         f'<div class="diagram-render"></div>'
                         f'</div>'
                     )
