@@ -28,6 +28,25 @@ DIAGRAM_LANGUAGES = {
     'nomnoml': ['nomnoml'],
 }
 
+COLOR_PRESETS = {
+    'blue': {
+        'accentColor': '#2563eb', 'accentLight': '#dbeafe',
+        'headerFrom': '#1e3a5f', 'headerTo': '#2563eb',
+    },
+    'green': {
+        'accentColor': '#16a34a', 'accentLight': '#dcfce7',
+        'headerFrom': '#14532d', 'headerTo': '#16a34a',
+    },
+    'purple': {
+        'accentColor': '#7c3aed', 'accentLight': '#ede9fe',
+        'headerFrom': '#3b0764', 'headerTo': '#7c3aed',
+    },
+    'orange': {
+        'accentColor': '#ea580c', 'accentLight': '#fff7ed',
+        'headerFrom': '#7c2d12', 'headerTo': '#ea580c',
+    },
+}
+
 DIAGRAM_CSS = """\
 .diagram-block{margin:1rem 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;overflow-x:auto}
 .diagram-render{min-height:40px;display:flex;justify-content:center}
@@ -139,6 +158,13 @@ def load_config(start_dir, title=''):
                 # Auto-derive logoText from projectName if not explicitly set
                 if 'logoText' not in cfg and 'projectName' in cfg:
                     result['logoText'] = cfg['projectName'][:2]
+                # Merge color preset if colorScheme is set
+                scheme = result.get('colorScheme', '')
+                if scheme in COLOR_PRESETS:
+                    preset = COLOR_PRESETS[scheme]
+                    for k, v in preset.items():
+                        if k not in cfg:
+                            result[k] = v
                 found_config = True
                 return result
             except (json.JSONDecodeError, OSError):
@@ -555,6 +581,61 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 """
 
 
+INDEX_RTL_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f0f2f5;color:#212121;min-height:100vh;direction:rtl}
+.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:3rem 2rem;text-align:center}
+.header-logo{width:80px;height:80px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;color:{{HEADER_FROM}};font-weight:700;margin:0 auto 1rem}
+.header h1{font-size:36px;font-weight:700;margin-bottom:.5rem}
+.header p{font-size:16px;opacity:.9;max-width:600px;margin:0 auto}
+.container{max-width:1000px;margin:2.5rem auto;padding:0 2rem}
+.section-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem}
+.section-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;transition:transform .2s,box-shadow .2s;text-decoration:none;color:inherit;display:flex;flex-direction:column}
+.section-card:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.card-accent{height:6px}
+.card-accent.blue{background:linear-gradient(90deg,#1565C0,#42A5F5)}
+.card-accent.green{background:linear-gradient(90deg,#2E7D32,#66BB6A)}
+.card-accent.purple{background:linear-gradient(90deg,#7B1FA2,#BA68C8)}
+.card-body{padding:1.5rem;flex:1;display:flex;flex-direction:column}
+.card-icon{font-size:36px;margin-bottom:.75rem}
+.card-lang{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:.15rem .5rem;border-radius:8px;margin-bottom:.5rem;width:fit-content}
+.card-lang.he{background:#E8F5E9;color:#2E7D32}
+.card-lang.en{background:#E3F2FD;color:#1565C0}
+.card-body h2{font-size:20px;font-weight:600;margin-bottom:.4rem}
+.card-body p{font-size:14px;color:#616161;line-height:1.6;flex:1}
+.card-meta{display:flex;gap:1.5rem;padding-top:1rem;margin-top:auto;border-top:1px solid #f0f0f0;font-size:13px;color:#9E9E9E}
+.card-meta strong{color:#424242}
+.footer{text-align:center;padding:2rem;color:#9E9E9E;font-size:13px;margin-top:1rem}
+@media(max-width:480px){.section-grid{grid-template-columns:1fr}.header h1{font-size:28px}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-logo">{{LOGO_TEXT}}</div>
+  <h1>{{PROJECT_NAME}}</h1>
+  {{ORG_HTML}}
+</header>
+<div class="container">
+<div class="section-grid">
+{{CONTENT}}
+</div>
+</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; Generated: {{GENERATION_DATE}}</div>
+</body>
+</html>
+"""
+
+
 # ─── Hebrew detection ─────────────────────────────────────────────────────────
 
 def is_hebrew(text: str) -> bool:
@@ -905,6 +986,24 @@ def convert_file(md_path: str) -> str:
              .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
              .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else ''))
 
+    # Apply config-driven accent colors to :root CSS variables
+    css_overrides = {
+        '--accent:': ('accentColor', '#2563eb'),
+        '--accent-light:': ('accentLight', '#dbeafe'),
+        '--header-from:': ('headerFrom', '#1e3a5f'),
+        '--header-to:': ('headerTo', '#2563eb'),
+    }
+    for css_var, (cfg_key, default_val) in css_overrides.items():
+        custom_val = config.get(cfg_key, '')
+        if custom_val and custom_val != default_val:
+            # Replace e.g. --accent:#2563eb with --accent:#custom
+            final = re.sub(
+                re.escape(css_var) + r'#[0-9a-fA-F]{3,8}',
+                css_var + custom_val,
+                final,
+                count=1,
+            )
+
     out_path = md_path.with_suffix('.html')
     out_path.write_text(final, encoding='utf-8')
     return str(out_path)
@@ -915,6 +1014,15 @@ def convert_file(md_path: str) -> str:
 def generate_index(folder: str) -> str:
     """Generate index.html for a folder listing .md files and subfolders."""
     folder = Path(folder).resolve()
+    out_path = folder / 'index.html'
+
+    # Preserve custom index files
+    if out_path.exists():
+        existing = out_path.read_text(encoding='utf-8')
+        if '<!-- custom-index -->' in existing:
+            print(f'  skipped (custom index): {out_path}')
+            return str(out_path)
+
     folder_name = folder.name or 'Docs'
     gen_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
@@ -927,6 +1035,8 @@ def generate_index(folder: str) -> str:
 
     cards_html = ''
     accent_colors = ['blue', 'green', 'purple']
+    hebrew_count = 0
+    total_count = 0
 
     if md_files:
         for idx, md in enumerate(md_files):
@@ -934,6 +1044,9 @@ def generate_index(folder: str) -> str:
             t, s = extract_metadata(text)
             html_name = md.stem + '.html'
             is_heb = is_hebrew(text)
+            if is_heb:
+                hebrew_count += 1
+            total_count += 1
             lang_cls = 'he' if is_heb else 'en'
             lang_label = 'Hebrew' if is_heb else 'English'
             accent = accent_colors[idx % len(accent_colors)]
@@ -962,6 +1075,9 @@ def generate_index(folder: str) -> str:
             if first_md:
                 sample = first_md.read_text(encoding='utf-8')[:500]
                 is_heb = is_hebrew(sample)
+            if is_heb:
+                hebrew_count += 1
+            total_count += 1
             lang_cls = 'he' if is_heb else 'en'
             lang_label = 'Hebrew' if is_heb else 'English'
             accent = accent_colors[(idx + len(md_files)) % len(accent_colors)]
@@ -982,11 +1098,21 @@ def generate_index(folder: str) -> str:
 
     config = load_config(str(folder), title=folder_name)
     org_name = config.get('orgName', '')
-    org_html = f'<p>{html.escape(org_name)}</p>' if org_name else ''
+    # Subtitle fallback chain: config.subtitle → orgName → empty
+    subtitle_text = config.get('subtitle', '')
+    org_html = ''
+    if subtitle_text:
+        org_html = f'<p>{html.escape(subtitle_text)}</p>'
+    elif org_name:
+        org_html = f'<p>{html.escape(org_name)}</p>'
     header_from = config.get('headerFrom', '#1e3a5f')
     header_to = config.get('headerTo', '#2563eb')
 
-    final = (INDEX_TEMPLATE
+    # Pick RTL template if majority of docs are Hebrew
+    use_rtl = total_count > 0 and hebrew_count > total_count / 2
+    template = INDEX_RTL_TEMPLATE if use_rtl else INDEX_TEMPLATE
+
+    final = (template
              .replace('{{TITLE}}', html.escape(folder_name))
              .replace('{{SUBTITLE}}', f'{len(md_files)} documents')
              .replace('{{CONTENT}}', cards_html)
@@ -998,7 +1124,6 @@ def generate_index(folder: str) -> str:
              .replace('{{HEADER_FROM}}', header_from)
              .replace('{{HEADER_TO}}', header_to))
 
-    out_path = folder / 'index.html'
     out_path.write_text(final, encoding='utf-8')
     return str(out_path)
 
