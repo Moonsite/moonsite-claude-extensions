@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.1.2
+version: 2.1.3
 ---
 
 # md-html-docs

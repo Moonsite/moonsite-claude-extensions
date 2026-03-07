@@ -202,12 +202,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar details[open] summary::before{transform:rotate(90deg)}
 .sidebar details summary a{display:inline}
 /* ── Layout switcher ── */
-.layout-toolbar{display:flex;gap:.4rem;justify-content:center;margin-bottom:1.5rem}
-.layout-toolbar button{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.25rem .6rem;font-size:.75rem;cursor:pointer;color:var(--muted);transition:all .15s}
-.layout-toolbar button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.layout-toolbar{margin-left:auto;display:flex;gap:.3rem;align-items:center}
+.layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
+.layout-toolbar button:hover{background:rgba(255,255,255,.25)}
+.layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
 .layout-narrow .content{max-width:860px}
 .layout-wide .content{max-width:1100px}
-.layout-fluid .content{max-width:100%;padding-left:3rem;padding-right:3rem}
+.layout-fluid .page{max-width:100%}
+.layout-fluid .content{max-width:100%}
 
 /* ── Mobile TOC toggle ── */
 .toc-toggle{display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
@@ -276,6 +278,11 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
     <div class="org">{{ORG_NAME}}</div>
   </div>
   <div class="header-badge">{{BADGE_TEXT}}</div>
+  <div class="layout-toolbar">
+    <button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
+    <button onclick="setLayout('wide')" id="btn-wide">Wide</button>
+    <button onclick="setLayout('fluid')" id="btn-fluid">Full</button>
+  </div>
 </header>
 <div class="page">
 <nav class="sidebar" id="sidebar">
@@ -290,11 +297,6 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
-</div>
-<div class="layout-toolbar">
-<button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
-<button onclick="setLayout('wide')" id="btn-wide">Wide</button>
-<button onclick="setLayout('fluid')" id="btn-fluid">Fluid</button>
 </div>
 {{CONTENT}}
 <div class="footer">
@@ -369,12 +371,14 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .sidebar details[open] summary::before{transform:rotate(-90deg)}
 .sidebar details summary a{display:inline}
 /* ── Layout switcher ── */
-.layout-toolbar{display:flex;gap:.4rem;justify-content:center;margin-bottom:1.5rem}
-.layout-toolbar button{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.25rem .6rem;font-size:.75rem;cursor:pointer;color:var(--muted);transition:all .15s}
-.layout-toolbar button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.layout-toolbar{margin-left:auto;display:flex;gap:.3rem;align-items:center}
+.layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
+.layout-toolbar button:hover{background:rgba(255,255,255,.25)}
+.layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
 .layout-narrow .content{max-width:860px}
 .layout-wide .content{max-width:1100px}
-.layout-fluid .content{max-width:100%;padding-left:3rem;padding-right:3rem}
+.layout-fluid .page{max-width:100%}
+.layout-fluid .content{max-width:100%}
 
 /* ── Mobile TOC toggle ── */
 .toc-toggle{display:none;position:fixed;bottom:1.5rem;left:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
@@ -446,6 +450,11 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
     <div class="org">{{ORG_NAME}}</div>
   </div>
   <div class="header-badge">{{BADGE_TEXT}}</div>
+  <div class="layout-toolbar">
+    <button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
+    <button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
+    <button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
+  </div>
 </header>
 <div class="page">
 <nav class="sidebar" id="sidebar">
@@ -460,11 +469,6 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <h1>{{TITLE}}</h1>
 <div class="subtitle">{{SUBTITLE}}</div>
 <div class="date">{{GENERATION_DATE}}</div>
-</div>
-<div class="layout-toolbar">
-<button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
-<button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
-<button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
 </div>
 {{CONTENT}}
 <div class="footer">
@@ -504,43 +508,48 @@ INDEX_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
-.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
-.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
-.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
-.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
-.container{max-width:800px;margin:0 auto;padding:3rem 2rem}
-h1.page-title{font-size:2rem;font-weight:700;margin-bottom:.5rem}
-.subtitle{color:var(--muted);margin-bottom:2rem}
-.section{margin-bottom:2rem}
-.section h2{font-size:1.2rem;font-weight:600;margin-bottom:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:.85rem}
-.card{display:block;padding:1rem 1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:.5rem;text-decoration:none;color:var(--text);transition:border-color .15s}
-.card:hover{border-color:var(--accent)}
-.card .title{font-weight:600;margin-bottom:.25rem}
-.card .desc{color:var(--muted);font-size:.9rem}
-.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;color:#212121;min-height:100vh}
+.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:3rem 2rem;text-align:center}
+.header-logo{width:80px;height:80px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;color:{{HEADER_FROM}};font-weight:700;margin:0 auto 1rem}
+.header h1{font-size:36px;font-weight:700;margin-bottom:.5rem}
+.header p{font-size:16px;opacity:.9;max-width:600px;margin:0 auto}
+.container{max-width:1000px;margin:2.5rem auto;padding:0 2rem}
+.section-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem}
+.section-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;transition:transform .2s,box-shadow .2s;text-decoration:none;color:inherit;display:flex;flex-direction:column}
+.section-card:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.card-accent{height:6px}
+.card-accent.blue{background:linear-gradient(90deg,#1565C0,#42A5F5)}
+.card-accent.green{background:linear-gradient(90deg,#2E7D32,#66BB6A)}
+.card-accent.purple{background:linear-gradient(90deg,#7B1FA2,#BA68C8)}
+.card-body{padding:1.5rem;flex:1;display:flex;flex-direction:column}
+.card-icon{font-size:36px;margin-bottom:.75rem}
+.card-lang{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:.15rem .5rem;border-radius:8px;margin-bottom:.5rem;width:fit-content}
+.card-lang.he{background:#E8F5E9;color:#2E7D32}
+.card-lang.en{background:#E3F2FD;color:#1565C0}
+.card-body h2{font-size:20px;font-weight:600;margin-bottom:.4rem}
+.card-body p{font-size:14px;color:#616161;line-height:1.6;flex:1}
+.card-meta{display:flex;gap:1.5rem;padding-top:1rem;margin-top:auto;border-top:1px solid #f0f0f0;font-size:13px;color:#9E9E9E}
+.card-meta strong{color:#424242}
+.footer{text-align:center;padding:2rem;color:#9E9E9E;font-size:13px;margin-top:1rem}
+@media(max-width:480px){.section-grid{grid-template-columns:1fr}.header h1{font-size:28px}}
 </style>
 </head>
 <body>
-<header class="site-header">
-  <div class="logo-circle">{{LOGO_TEXT}}</div>
-  <div class="header-text">
-    <h1>{{PROJECT_NAME}}</h1>
-    {{ORG_HTML}}
-  </div>
-  {{BADGE_HTML}}
+<header class="header">
+  <div class="header-logo">{{LOGO_TEXT}}</div>
+  <h1>{{PROJECT_NAME}}</h1>
+  {{ORG_HTML}}
 </header>
 <div class="container">
-<h1 class="page-title">{{TITLE}}</h1>
-<div class="subtitle">{{SUBTITLE}}</div>
+<div class="section-grid">
 {{CONTENT}}
-<div class="footer">{{FOOTER_TEXT}} &middot; Generated: {{GENERATION_DATE}}</div>
 </div>
+</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; Generated: {{GENERATION_DATE}}</div>
 </body>
 </html>
 """
@@ -916,44 +925,78 @@ def generate_index(folder: str) -> str:
                       if d.is_dir() and not d.name.startswith('.')
                       and list(d.glob('*.md'))])
 
-    sections_html = ''
+    cards_html = ''
+    accent_colors = ['blue', 'green', 'purple']
 
     if md_files:
-        sections_html += '<div class="section"><h2>Documents</h2>\n'
-        for md in md_files:
+        for idx, md in enumerate(md_files):
             text = md.read_text(encoding='utf-8')
             t, s = extract_metadata(text)
             html_name = md.stem + '.html'
-            desc = f'<div class="desc">{html.escape(s)}</div>' if s else ''
-            sections_html += (f'<a class="card" href="{html_name}">'
-                              f'<div class="title">{html.escape(t)}</div>{desc}</a>\n')
-        sections_html += '</div>\n'
+            is_heb = is_hebrew(text)
+            lang_cls = 'he' if is_heb else 'en'
+            lang_label = 'Hebrew' if is_heb else 'English'
+            accent = accent_colors[idx % len(accent_colors)]
+            icon = '&#128214;' if is_heb else '&#128196;'
+            desc_html = f'<p>{html.escape(s)}</p>' if s else '<p></p>'
+            cards_html += (
+                f'<a class="section-card" href="{html_name}">'
+                f'<div class="card-accent {accent}"></div>'
+                f'<div class="card-body">'
+                f'<div class="card-icon">{icon}</div>'
+                f'<span class="card-lang {lang_cls}">{lang_label}</span>'
+                f'<h2>{html.escape(t)}</h2>'
+                f'{desc_html}'
+                f'<div class="card-meta">'
+                f'<span><strong>{lang_label}</strong> doc</span>'
+                f'</div>'
+                f'</div></a>\n'
+            )
 
     if subdirs:
-        sections_html += '<div class="section"><h2>Folders</h2>\n'
-        for d in subdirs:
-            count = len(list(d.glob('*.md')))
-            sections_html += (f'<a class="card" href="{d.name}/index.html">'
-                              f'<div class="title">{d.name}/</div>'
-                              f'<div class="desc">{count} document{"s" if count != 1 else ""}</div></a>\n')
-        sections_html += '</div>\n'
+        for idx, d in enumerate(subdirs):
+            md_count = len(list(d.glob('*.md')))
+            # Check language of first .md in subfolder
+            first_md = next(d.glob('*.md'), None)
+            is_heb = False
+            if first_md:
+                sample = first_md.read_text(encoding='utf-8')[:500]
+                is_heb = is_hebrew(sample)
+            lang_cls = 'he' if is_heb else 'en'
+            lang_label = 'Hebrew' if is_heb else 'English'
+            accent = accent_colors[(idx + len(md_files)) % len(accent_colors)]
+            icon = '&#128194;'
+            cards_html += (
+                f'<a class="section-card" href="{d.name}/index.html">'
+                f'<div class="card-accent {accent}"></div>'
+                f'<div class="card-body">'
+                f'<div class="card-icon">{icon}</div>'
+                f'<span class="card-lang {lang_cls}">{lang_label}</span>'
+                f'<h2>{d.name}</h2>'
+                f'<p>{md_count} document{"s" if md_count != 1 else ""}</p>'
+                f'<div class="card-meta">'
+                f'<span><strong>{md_count}</strong> doc{"s" if md_count != 1 else ""}</span>'
+                f'</div>'
+                f'</div></a>\n'
+            )
 
     config = load_config(str(folder), title=folder_name)
     org_name = config.get('orgName', '')
-    badge_text = config.get('badgeText', '')
-    org_html = f'<div class="org">{html.escape(org_name)}</div>' if org_name else ''
-    badge_html = f'<div class="header-badge">{html.escape(badge_text)}</div>' if badge_text else ''
+    org_html = f'<p>{html.escape(org_name)}</p>' if org_name else ''
+    header_from = config.get('headerFrom', '#1e3a5f')
+    header_to = config.get('headerTo', '#2563eb')
 
     final = (INDEX_TEMPLATE
              .replace('{{TITLE}}', html.escape(folder_name))
              .replace('{{SUBTITLE}}', f'{len(md_files)} documents')
-             .replace('{{CONTENT}}', sections_html)
+             .replace('{{CONTENT}}', cards_html)
              .replace('{{GENERATION_DATE}}', gen_date)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
              .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
              .replace('{{ORG_HTML}}', org_html)
-             .replace('{{BADGE_HTML}}', badge_html)
-             .replace('{{FOOTER_TEXT}}', html.escape(config['footerText'])))
+             .replace('{{FOOTER_TEXT}}', html.escape(config['footerText']))
+             .replace('{{HEADER_FROM}}', header_from)
+             .replace('{{HEADER_TO}}', header_to))
 
     out_path = folder / 'index.html'
     out_path.write_text(final, encoding='utf-8')
