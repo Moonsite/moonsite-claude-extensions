@@ -26,6 +26,7 @@ DIAGRAM_LANGUAGES = {
     'dot': ['vizjs'],
     'graphviz': ['vizjs'],
     'nomnoml': ['nomnoml'],
+    'd2': ['kroki'],
 }
 
 COLOR_PRESETS = {
@@ -113,6 +114,14 @@ var renderers={
     var parser=new DOMParser();
     var doc=parser.parseFromString(svgStr,'image/svg+xml');
     el.appendChild(doc.documentElement);
+  },
+  kroki:function(src,el){
+    var lang=el.closest('.diagram-block').dataset.lang||'d2';
+    el.textContent='Rendering...';
+    fetch('https://kroki.io/'+lang+'/svg',{method:'POST',headers:{'Content-Type':'text/plain'},body:src})
+    .then(function(r){if(!r.ok)throw new Error('Kroki returned '+r.status);return r.text()})
+    .then(function(svg){el.innerHTML=svg})
+    .catch(function(e){var d=document.createElement('div');d.className='diagram-error';d.textContent='Render error: '+e.message;el.textContent='';el.appendChild(d)});
   }
 };
 document.querySelectorAll('.diagram-block').forEach(function(block){

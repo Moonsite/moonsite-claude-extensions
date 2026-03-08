@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.3.2
+version: 2.3.3
 ---
 
 # md-html-docs
@@ -53,4 +53,4 @@ Use `/md-html-docs-convert` with a path:
 - **Commit `.md` and `.html` together** — never commit one without the other
 - **Images**: reference with relative paths in markdown, e.g. `![alt](images/screenshot.png)`
 - **Templates are auto-selected** — Hebrew content gets RTL, everything else gets LTR
-- **Diagram blocks** (`mermaid`, `pintora`, `dot`, `graphviz`, `nomnoml`) render as interactive SVGs via client-side libraries
+- **Diagram blocks** (`mermaid`, `pintora`, `dot`, `graphviz`, `nomnoml`, `d2`) render as interactive SVGs via client-side libraries (d2 uses Kroki.io API)
