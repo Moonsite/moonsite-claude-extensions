@@ -168,9 +168,17 @@ mark.noted.active{background:#fde047;box-shadow:0 0 0 2px rgba(234,179,8,.4)}
 .notes-panel-header button{background:none;border:none;cursor:pointer;font-size:.8rem;color:#2563eb;font-weight:500;padding:.1rem .3rem}
 .notes-panel-header button:hover{text-decoration:underline}
 .notes-panel-header .notes-clear{color:#dc2626}
+.notes-panel-toolbar{display:none;padding:.4rem .75rem;background:#fef2f2;border-bottom:1px solid #fca5a5;align-items:center;gap:.5rem;font-size:.8rem}
+.notes-panel-toolbar.visible{display:flex}
+.notes-panel-toolbar .del-selected{background:#dc2626;color:#fff;border:none;border-radius:5px;padding:.25rem .6rem;cursor:pointer;font-size:.78rem;font-family:inherit}
+.notes-panel-toolbar .del-selected:hover{background:#b91c1c}
+.notes-panel-toolbar .sel-count{color:#dc2626;font-weight:600}
+.notes-panel-toolbar .select-all-btn{margin-left:auto;color:#2563eb;background:none;border:none;cursor:pointer;font-size:.78rem;font-family:inherit}
 .notes-panel-body{overflow-y:auto;padding:.5rem;flex:1}
-.notes-panel-item{padding:.6rem .75rem;border-radius:6px;cursor:pointer;margin-bottom:.3rem;transition:background .15s;font-size:.85rem;border:1px solid transparent}
+.notes-panel-item{padding:.5rem .6rem;border-radius:6px;margin-bottom:.3rem;transition:background .15s;font-size:.85rem;border:1px solid transparent;display:flex;gap:.5rem;align-items:flex-start}
 .notes-panel-item:hover{background:#fef9c3;border-color:#facc15}
+.notes-panel-item input[type="checkbox"]{margin-top:.25rem;flex-shrink:0;cursor:pointer;accent-color:#dc2626}
+.notes-panel-item .panel-item-content{flex:1;min-width:0;cursor:pointer}
 .notes-panel-item .panel-quoted{font-size:.78rem;color:#92400e;background:#fef3c7;padding:.2rem .4rem;border-radius:4px;margin-bottom:.3rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notes-panel-item .panel-note{color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notes-panel-empty{padding:1.5rem;text-align:center;color:#9ca3af;font-size:.85rem;line-height:1.6}
@@ -204,15 +212,9 @@ NOTES_JS = r"""
   function findTextRange(map,selected,ctxBefore,ctxAfter){
     var needle=ctxBefore+selected+ctxAfter;
     var idx=map.text.indexOf(needle);
-    if(idx===-1){
-      // Fallback: try without context
-      idx=map.text.indexOf(selected);
-      if(idx===-1)return null;
-    }else{
-      idx+=ctxBefore.length;
-    }
+    if(idx===-1){idx=map.text.indexOf(selected);if(idx===-1)return null}
+    else{idx+=ctxBefore.length}
     var startOff=idx,endOff=idx+selected.length;
-    // Map flat offsets back to DOM nodes
     var startNode,startLocal,endNode,endLocal;
     for(var i=0;i<map.nodes.length;i++){
       var nStart=map.offsets[i],nEnd=nStart+map.nodes[i].nodeValue.length;
@@ -226,45 +228,61 @@ NOTES_JS = r"""
     return range;
   }
 
-  // ── Highlight a range and return the <mark> element ──
+  // ── Highlight: wraps each text node segment individually for cross-element safety ──
   function highlightRange(range,noteId){
-    // Handle ranges that span multiple nodes by using extractContents
-    var frag=range.extractContents();
-    var mark=document.createElement('mark');
-    mark.className='noted';
-    mark.dataset.noteId=noteId;
-    mark.appendChild(frag);
-    range.insertNode(mark);
-    return mark;
+    var nodes=getTextNodes(content);
+    var started=false,marks=[];
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i],nLen=n.nodeValue.length;
+      var segStart=0,segEnd=nLen;
+      if(n===range.startContainer){started=true;segStart=range.startOffset}
+      if(!started)continue;
+      if(n===range.endContainer){segEnd=range.endOffset}
+      if(segStart>=segEnd){if(n===range.endContainer)break;continue}
+      // Split and wrap this segment
+      var r=document.createRange();
+      r.setStart(n,segStart);
+      r.setEnd(n,segEnd);
+      var mark=document.createElement('mark');
+      mark.className='noted';
+      mark.dataset.noteId=noteId;
+      r.surroundContents(mark);
+      marks.push(mark);
+      // After surroundContents, the walker is invalidated; re-fetch nodes
+      nodes=getTextNodes(content);
+      if(n===range.endContainer)break;
+    }
+    return marks[0]||null;
   }
 
   // ── Get surrounding context from selection ──
   function getContext(rangeObj,chars){
-    var map=buildTextMap(getTextNodes(content));
-    // Find where our selection sits in the full text
     var tempRange=document.createRange();
-    tempRange.selectNodeContents(content);
-    tempRange.setEnd(rangeObj.startContainer,rangeObj.startOffset);
-    var beforeAll=tempRange.toString();
-    var before=beforeAll.slice(-chars);
-    tempRange.selectNodeContents(content);
-    tempRange.setStart(rangeObj.endContainer,rangeObj.endOffset);
-    var afterAll=tempRange.toString();
-    var after=afterAll.slice(0,chars);
-    return{before:before,after:after};
+    try{
+      tempRange.selectNodeContents(content);
+      tempRange.setEnd(rangeObj.startContainer,rangeObj.startOffset);
+      var before=tempRange.toString().slice(-chars);
+      tempRange.selectNodeContents(content);
+      tempRange.setStart(rangeObj.endContainer,rangeObj.endOffset);
+      var after=tempRange.toString().slice(0,chars);
+      return{before:before,after:after};
+    }catch(e){return{before:'',after:''}}
   }
 
   // ── Restore all saved highlights on load ──
   function restoreNotes(){
     var map=buildTextMap(getTextNodes(content));
-    allNotes.forEach(function(n,i){
+    allNotes.forEach(function(n){
       var range=findTextRange(map,n.selectedText,n.ctxBefore||'',n.ctxAfter||'');
       if(range){
-        var mark=highlightRange(range,n.id);
-        bindMark(mark,n);
-        // Rebuild map after DOM mutation
+        highlightRange(range,n.id);
         map=buildTextMap(getTextNodes(content));
       }
+    });
+    // Bind all marks after restore
+    document.querySelectorAll('mark.noted').forEach(function(mark){
+      var nObj=allNotes.find(function(x){return x.id===mark.dataset.noteId});
+      if(nObj)bindMark(mark,nObj);
     });
   }
 
@@ -273,9 +291,10 @@ NOTES_JS = r"""
     mark.onclick=function(e){
       e.stopPropagation();
       closeAllEditors();
-      mark.classList.add('active');
+      // Highlight all marks for this note
+      document.querySelectorAll('mark.noted[data-note-id="'+noteObj.id+'"]').forEach(function(m){m.classList.add('active')});
       var rect=mark.getBoundingClientRect();
-      openEditor(rect,noteObj,mark);
+      openEditor(rect,noteObj,noteObj.id);
     };
   }
 
@@ -294,7 +313,6 @@ NOTES_JS = r"""
     btn.textContent='\uD83D\uDCDD Add Note';
     popup.appendChild(btn);
     document.body.appendChild(popup);
-    // Position above selection
     var top=rect.top+window.scrollY-popup.offsetHeight-6;
     var left=rect.left+window.scrollX+(rect.width/2)-(popup.offsetWidth/2);
     popup.style.top=Math.max(0,top)+'px';
@@ -307,17 +325,18 @@ NOTES_JS = r"""
       if(!selectedText.trim())return;
       var ctx=getContext(selRange,30);
       var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',createdAt:new Date().toISOString()};
-      var mark=highlightRange(selRange,noteObj.id);
-      var markRect=mark.getBoundingClientRect();
-      openEditor(markRect,noteObj,mark,true);
+      var firstMark=highlightRange(selRange,noteObj.id);
+      if(!firstMark)return;
+      window.getSelection().removeAllRanges();
+      var markRect=firstMark.getBoundingClientRect();
+      openEditor(markRect,noteObj,noteObj.id,true);
     };
   }
 
   // ── Note editor: positioned near the highlight ──
-  function openEditor(rect,noteObj,mark,isNew){
+  function openEditor(rect,noteObj,noteId,isNew){
     var editor=document.createElement('div');
     editor.className='note-editor';
-    // Show quoted text
     var quoted=document.createElement('div');
     quoted.className='note-selected';
     quoted.textContent='\u201C'+noteObj.selectedText.slice(0,80)+(noteObj.selectedText.length>80?'\u2026':'')+'\u201D';
@@ -342,29 +361,25 @@ NOTES_JS = r"""
 
     saveBtn.onclick=function(){
       var text=ta.value.trim();
-      if(!text){
-        removeNote(noteObj.id,mark,editor);
-        return;
-      }
+      if(!text){removeNoteById(noteId);editor.remove();return}
       noteObj.note=text;
-      // Upsert in storage
       var idx=allNotes.findIndex(function(n){return n.id===noteObj.id});
       if(idx>=0){allNotes[idx]=noteObj}else{allNotes.push(noteObj)}
       saveNotes(allNotes);
-      bindMark(mark,noteObj);
+      // Rebind all marks for this note
+      document.querySelectorAll('mark.noted[data-note-id="'+noteId+'"]').forEach(function(m){
+        m.classList.remove('active');
+        bindMark(m,noteObj);
+      });
       editor.remove();
-      mark.classList.remove('active');
       updateBadge();
     };
     cancelBtn.onclick=function(){
       editor.remove();
-      mark.classList.remove('active');
-      if(isNew){
-        // Unwrap mark since note was never saved
-        unwrapMark(mark);
-      }
+      document.querySelectorAll('mark.noted[data-note-id="'+noteId+'"]').forEach(function(m){m.classList.remove('active')});
+      if(isNew)unwrapMarksById(noteId);
     };
-    delBtn.onclick=function(){removeNote(noteObj.id,mark,editor)};
+    delBtn.onclick=function(){removeNoteById(noteId);editor.remove()};
 
     actions.appendChild(saveBtn);
     if(!isNew)actions.appendChild(delBtn);
@@ -372,10 +387,8 @@ NOTES_JS = r"""
     editor.appendChild(actions);
     document.body.appendChild(editor);
 
-    // Position below the highlight
     var top=rect.bottom+window.scrollY+6;
     var left=rect.left+window.scrollX;
-    // Keep within viewport
     if(left+320>window.innerWidth)left=window.innerWidth-330;
     if(left<4)left=4;
     editor.style.top=top+'px';
@@ -383,41 +396,46 @@ NOTES_JS = r"""
     ta.focus();
   }
 
-  function removeNote(id,mark,editor){
+  function removeNoteById(id){
     allNotes=allNotes.filter(function(n){return n.id!==id});
     saveNotes(allNotes);
-    unwrapMark(mark);
-    if(editor)editor.remove();
+    unwrapMarksById(id);
     updateBadge();
+  }
+
+  function unwrapMarksById(id){
+    document.querySelectorAll('mark.noted[data-note-id="'+id+'"]').forEach(unwrapMark);
   }
 
   function unwrapMark(mark){
     var parent=mark.parentNode;
+    if(!parent)return;
     while(mark.firstChild)parent.insertBefore(mark.firstChild,mark);
     parent.removeChild(mark);
-    parent.normalize(); // merge adjacent text nodes
+    parent.normalize();
   }
 
-  // ── Listen for text selection in .content ──
+  // ── Listen for text selection in .content (works on paragraphs, tables, lists, headings, etc.) ──
   var popupTimeout;
   document.addEventListener('mouseup',function(e){
-    if(e.target.closest('.note-popup,.note-editor,.notes-panel'))return;
+    if(e.target.closest&&e.target.closest('.note-popup,.note-editor,.notes-panel'))return;
     clearTimeout(popupTimeout);
     popupTimeout=setTimeout(function(){
       var sel=window.getSelection();
       if(!sel||sel.isCollapsed||!sel.rangeCount)return;
       var range=sel.getRangeAt(0);
-      // Only within .content, not in our own UI
-      if(!content.contains(range.commonAncestorContainer))return;
-      if(range.toString().trim().length<2)return;
+      // Must be within .content — handles all elements: p, td, th, li, h1-h4, blockquote, etc.
+      var ancestor=range.commonAncestorContainer;
+      if(ancestor.nodeType===3)ancestor=ancestor.parentNode;
+      if(!content.contains(ancestor))return;
+      if(range.toString().trim().length<1)return;
       var rect=range.getBoundingClientRect();
       showPopup(rect,range.cloneRange());
     },200);
   });
 
-  // Dismiss popup/editor on click outside
   document.addEventListener('mousedown',function(e){
-    if(!e.target.closest('.note-popup,.note-editor,.notes-panel,.notes-toggle,mark.noted')){
+    if(e.target.closest&&!e.target.closest('.note-popup,.note-editor,.notes-panel,.notes-toggle,mark.noted')){
       closeAllEditors();
     }
   });
@@ -434,6 +452,7 @@ NOTES_JS = r"""
 
   var panel=document.createElement('div');
   panel.className='notes-panel';
+  // Header
   var panelHeader=document.createElement('div');
   panelHeader.className='notes-panel-header';
   var headerLabel=document.createElement('span');
@@ -450,15 +469,46 @@ NOTES_JS = r"""
   clearBtn.textContent='Clear All';
   clearBtn.onclick=function(){
     if(!confirm('Remove all notes from this page?'))return;
-    allNotes=[];
-    saveNotes(allNotes);
+    allNotes=[];saveNotes(allNotes);
     document.querySelectorAll('mark.noted').forEach(unwrapMark);
-    updateBadge();
-    renderPanel();
+    updateBadge();renderPanel();
   };
   panelActions.appendChild(clearBtn);
   panelHeader.appendChild(panelActions);
   panel.appendChild(panelHeader);
+  // Selection toolbar
+  var toolbar=document.createElement('div');
+  toolbar.className='notes-panel-toolbar';
+  var selCount=document.createElement('span');
+  selCount.className='sel-count';
+  toolbar.appendChild(selCount);
+  var delSelBtn=document.createElement('button');
+  delSelBtn.className='del-selected';
+  delSelBtn.textContent='Delete Selected';
+  delSelBtn.onclick=function(){
+    var checks=panelBody.querySelectorAll('input[type="checkbox"]:checked');
+    if(!checks.length)return;
+    var ids=[];
+    checks.forEach(function(cb){ids.push(cb.dataset.noteId)});
+    ids.forEach(function(id){
+      allNotes=allNotes.filter(function(n){return n.id!==id});
+      unwrapMarksById(id);
+    });
+    saveNotes(allNotes);updateBadge();renderPanel();
+  };
+  toolbar.appendChild(delSelBtn);
+  var selectAllBtn=document.createElement('button');
+  selectAllBtn.className='select-all-btn';
+  selectAllBtn.textContent='Select All';
+  selectAllBtn.onclick=function(){
+    var checks=panelBody.querySelectorAll('input[type="checkbox"]');
+    var allChecked=true;
+    checks.forEach(function(cb){if(!cb.checked)allChecked=false});
+    checks.forEach(function(cb){cb.checked=!allChecked;cb.dispatchEvent(new Event('change'))});
+  };
+  toolbar.appendChild(selectAllBtn);
+  panel.appendChild(toolbar);
+  // Body
   var panelBody=document.createElement('div');
   panelBody.className='notes-panel-body';
   panel.appendChild(panelBody);
@@ -470,6 +520,17 @@ NOTES_JS = r"""
     if(panel.classList.contains('open'))renderPanel();
   };
 
+  function updateToolbar(){
+    var checks=panelBody.querySelectorAll('input[type="checkbox"]:checked');
+    var count=checks.length;
+    if(count>0){
+      toolbar.classList.add('visible');
+      selCount.textContent=count+' selected';
+    }else{
+      toolbar.classList.remove('visible');
+    }
+  }
+
   function updateBadge(){
     badge.textContent=allNotes.length||'';
   }
@@ -477,6 +538,7 @@ NOTES_JS = r"""
   function renderPanel(){
     allNotes=loadNotes();
     panelBody.textContent='';
+    toolbar.classList.remove('visible');
     if(!allNotes.length){
       var empty=document.createElement('div');
       empty.className='notes-panel-empty';
@@ -487,15 +549,22 @@ NOTES_JS = r"""
     allNotes.forEach(function(n){
       var item=document.createElement('div');
       item.className='notes-panel-item';
+      var cb=document.createElement('input');
+      cb.type='checkbox';
+      cb.dataset.noteId=n.id;
+      cb.onchange=updateToolbar;
+      item.appendChild(cb);
+      var itemContent=document.createElement('div');
+      itemContent.className='panel-item-content';
       var q=document.createElement('div');
       q.className='panel-quoted';
       q.textContent='\u201C'+n.selectedText.slice(0,60)+(n.selectedText.length>60?'\u2026':'')+'\u201D';
-      item.appendChild(q);
+      itemContent.appendChild(q);
       var t=document.createElement('div');
       t.className='panel-note';
       t.textContent=n.note.split('\n')[0];
-      item.appendChild(t);
-      item.onclick=function(){
+      itemContent.appendChild(t);
+      itemContent.onclick=function(){
         panel.classList.remove('open');
         var mark=document.querySelector('mark.noted[data-note-id="'+n.id+'"]');
         if(mark){
@@ -504,6 +573,7 @@ NOTES_JS = r"""
           setTimeout(function(){mark.click()},400);
         }
       };
+      item.appendChild(itemContent);
       panelBody.appendChild(item);
     });
   }
@@ -998,6 +1068,7 @@ INDEX_TEMPLATE = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>if(location.pathname.slice(-1)!=='/'&&!location.pathname.match(/\\.html?$/i))location.replace(location.pathname+'/'+location.search+location.hash);</script>
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1053,6 +1124,7 @@ INDEX_RTL_TEMPLATE = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>if(location.pathname.slice(-1)!=='/'&&!location.pathname.match(/\\.html?$/i))location.replace(location.pathname+'/'+location.search+location.hash);</script>
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
