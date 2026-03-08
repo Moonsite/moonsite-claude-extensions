@@ -1072,47 +1072,57 @@ INDEX_TEMPLATE = """\
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;color:#212121;min-height:100vh}
-.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:3rem 2rem;text-align:center}
-.header-logo{width:80px;height:80px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;color:{{HEADER_FROM}};font-weight:700;margin:0 auto 1rem}
-.header h1{font-size:36px;font-weight:700;margin-bottom:.5rem}
-.header p{font-size:16px;opacity:.9;max-width:600px;margin:0 auto}
-.container{max-width:1000px;margin:2.5rem auto;padding:0 2rem}
-.section-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem}
-.section-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;transition:transform .2s,box-shadow .2s;text-decoration:none;color:inherit;display:flex;flex-direction:column}
-.section-card:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
-.card-accent{height:6px}
-.card-accent.blue{background:linear-gradient(90deg,#1565C0,#42A5F5)}
-.card-accent.green{background:linear-gradient(90deg,#2E7D32,#66BB6A)}
-.card-accent.purple{background:linear-gradient(90deg,#7B1FA2,#BA68C8)}
-.card-body{padding:1.5rem;flex:1;display:flex;flex-direction:column}
-.card-icon{font-size:36px;margin-bottom:.75rem}
-.card-lang{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:.15rem .5rem;border-radius:8px;margin-bottom:.5rem;width:fit-content}
-.card-lang.he{background:#E8F5E9;color:#2E7D32}
-.card-lang.en{background:#E3F2FD;color:#1565C0}
-.card-body h2{font-size:20px;font-weight:600;margin-bottom:.4rem}
-.card-body p{font-size:14px;color:#616161;line-height:1.6;flex:1}
-.card-meta{display:flex;gap:1.5rem;padding-top:1rem;margin-top:auto;border-top:1px solid #f0f0f0;font-size:13px;color:#9E9E9E}
-.card-meta strong{color:#424242}
-.footer{text-align:center;padding:2rem;color:#9E9E9E;font-size:13px;margin-top:1rem}
-@media(max-width:480px){.section-grid{grid-template-columns:1fr}.header h1{font-size:28px}}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh}
+.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:2.5rem 2rem 2rem;position:relative;overflow:hidden}
+.header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(to bottom right,transparent 49.5%,#f8f9fb 50%)}
+.header-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:1.25rem;position:relative;z-index:1}
+.header-logo{width:52px;height:52px;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;font-weight:700;flex-shrink:0;border:1px solid rgba(255,255,255,.2)}
+.header-text h1{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.header-text p{font-size:14px;opacity:.8;margin-top:.15rem}
+.container{max-width:900px;margin:0 auto;padding:1.5rem 2rem 2rem}
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6b7280;margin-bottom:.75rem}
+.section-grid{display:grid;grid-template-columns:1fr;gap:.5rem}
+.section-card{background:#fff;border-radius:10px;border:1px solid #e5e7eb;text-decoration:none;color:inherit;display:flex;align-items:stretch;transition:all .15s ease;position:relative;overflow:hidden}
+.section-card:hover{border-color:#c7d2fe;box-shadow:0 2px 12px rgba(99,102,241,.1);transform:translateX(2px)}
+.card-stripe{width:4px;flex-shrink:0;border-radius:4px 0 0 4px}
+.card-stripe.blue{background:#6366f1}
+.card-stripe.green{background:#10b981}
+.card-stripe.purple{background:#a855f7}
+.card-body{padding:.875rem 1rem;flex:1;min-width:0;display:flex;align-items:center;gap:1rem}
+.card-info{flex:1;min-width:0}
+.card-info h2{font-size:15px;font-weight:600;margin-bottom:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-info p{font-size:13px;color:#6b7280;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-badges{display:flex;gap:.4rem;flex-shrink:0;align-items:center}
+.card-badge{font-size:10px;font-weight:500;padding:.2rem .5rem;border-radius:6px;white-space:nowrap}
+.card-badge.lang-he{background:#ecfdf5;color:#059669}
+.card-badge.lang-en{background:#eef2ff;color:#4f46e5}
+.card-badge.folder{background:#fef3c7;color:#b45309}
+.card-arrow{color:#d1d5db;font-size:14px;flex-shrink:0;transition:color .15s}
+.section-card:hover .card-arrow{color:#6366f1}
+.footer{text-align:center;padding:2rem;color:#9ca3af;font-size:12px;margin-top:1rem}
+@media(max-width:480px){.header-inner{flex-direction:column;text-align:center}.container{padding:1rem}.card-badges{display:none}}
 </style>
 </head>
 <body>
 <header class="header">
-  <div class="header-logo">{{LOGO_TEXT}}</div>
-  <h1>{{PROJECT_NAME}}</h1>
-  {{ORG_HTML}}
+  <div class="header-inner">
+    <div class="header-logo">{{LOGO_TEXT}}</div>
+    <div class="header-text">
+      <h1>{{PROJECT_NAME}}</h1>
+      {{ORG_HTML}}
+    </div>
+  </div>
 </header>
 <div class="container">
+<div class="section-label">{{SUBTITLE}}</div>
 <div class="section-grid">
 {{CONTENT}}
 </div>
 </div>
-<div class="footer">{{FOOTER_TEXT}} &mdash; Generated: {{GENERATION_DATE}}</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; {{GENERATION_DATE}}</div>
 </body>
 </html>
 """
@@ -1131,44 +1141,54 @@ INDEX_RTL_TEMPLATE = """\
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f0f2f5;color:#212121;min-height:100vh;direction:rtl}
-.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:3rem 2rem;text-align:center}
-.header-logo{width:80px;height:80px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;color:{{HEADER_FROM}};font-weight:700;margin:0 auto 1rem}
-.header h1{font-size:36px;font-weight:700;margin-bottom:.5rem}
-.header p{font-size:16px;opacity:.9;max-width:600px;margin:0 auto}
-.container{max-width:1000px;margin:2.5rem auto;padding:0 2rem}
-.section-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem}
-.section-card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;transition:transform .2s,box-shadow .2s;text-decoration:none;color:inherit;display:flex;flex-direction:column}
-.section-card:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
-.card-accent{height:6px}
-.card-accent.blue{background:linear-gradient(90deg,#1565C0,#42A5F5)}
-.card-accent.green{background:linear-gradient(90deg,#2E7D32,#66BB6A)}
-.card-accent.purple{background:linear-gradient(90deg,#7B1FA2,#BA68C8)}
-.card-body{padding:1.5rem;flex:1;display:flex;flex-direction:column}
-.card-icon{font-size:36px;margin-bottom:.75rem}
-.card-lang{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:.15rem .5rem;border-radius:8px;margin-bottom:.5rem;width:fit-content}
-.card-lang.he{background:#E8F5E9;color:#2E7D32}
-.card-lang.en{background:#E3F2FD;color:#1565C0}
-.card-body h2{font-size:20px;font-weight:600;margin-bottom:.4rem}
-.card-body p{font-size:14px;color:#616161;line-height:1.6;flex:1}
-.card-meta{display:flex;gap:1.5rem;padding-top:1rem;margin-top:auto;border-top:1px solid #f0f0f0;font-size:13px;color:#9E9E9E}
-.card-meta strong{color:#424242}
-.footer{text-align:center;padding:2rem;color:#9E9E9E;font-size:13px;margin-top:1rem}
-@media(max-width:480px){.section-grid{grid-template-columns:1fr}.header h1{font-size:28px}}
+body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh;direction:rtl}
+.header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:2.5rem 2rem 2rem;position:relative;overflow:hidden}
+.header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(to bottom left,transparent 49.5%,#f8f9fb 50%)}
+.header-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:1.25rem;position:relative;z-index:1}
+.header-logo{width:52px;height:52px;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;font-weight:700;flex-shrink:0;border:1px solid rgba(255,255,255,.2)}
+.header-text h1{font-size:24px;font-weight:700;letter-spacing:-.01em}
+.header-text p{font-size:14px;opacity:.8;margin-top:.15rem}
+.container{max-width:900px;margin:0 auto;padding:1.5rem 2rem 2rem}
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6b7280;margin-bottom:.75rem}
+.section-grid{display:grid;grid-template-columns:1fr;gap:.5rem}
+.section-card{background:#fff;border-radius:10px;border:1px solid #e5e7eb;text-decoration:none;color:inherit;display:flex;align-items:stretch;transition:all .15s ease;position:relative;overflow:hidden;flex-direction:row-reverse}
+.section-card:hover{border-color:#c7d2fe;box-shadow:0 2px 12px rgba(99,102,241,.1);transform:translateX(-2px)}
+.card-stripe{width:4px;flex-shrink:0;border-radius:0 4px 4px 0}
+.card-stripe.blue{background:#6366f1}
+.card-stripe.green{background:#10b981}
+.card-stripe.purple{background:#a855f7}
+.card-body{padding:.875rem 1rem;flex:1;min-width:0;display:flex;align-items:center;gap:1rem}
+.card-info{flex:1;min-width:0}
+.card-info h2{font-size:15px;font-weight:600;margin-bottom:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-info p{font-size:13px;color:#6b7280;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-badges{display:flex;gap:.4rem;flex-shrink:0;align-items:center}
+.card-badge{font-size:10px;font-weight:500;padding:.2rem .5rem;border-radius:6px;white-space:nowrap}
+.card-badge.lang-he{background:#ecfdf5;color:#059669}
+.card-badge.lang-en{background:#eef2ff;color:#4f46e5}
+.card-badge.folder{background:#fef3c7;color:#b45309}
+.card-arrow{color:#d1d5db;font-size:14px;flex-shrink:0;transition:color .15s}
+.section-card:hover .card-arrow{color:#6366f1}
+.footer{text-align:center;padding:2rem;color:#9ca3af;font-size:12px;margin-top:1rem}
+@media(max-width:480px){.header-inner{flex-direction:column;text-align:center}.container{padding:1rem}.card-badges{display:none}}
 </style>
 </head>
 <body>
 <header class="header">
-  <div class="header-logo">{{LOGO_TEXT}}</div>
-  <h1>{{PROJECT_NAME}}</h1>
-  {{ORG_HTML}}
+  <div class="header-inner">
+    <div class="header-logo">{{LOGO_TEXT}}</div>
+    <div class="header-text">
+      <h1>{{PROJECT_NAME}}</h1>
+      {{ORG_HTML}}
+    </div>
+  </div>
 </header>
 <div class="container">
+<div class="section-label">{{SUBTITLE}}</div>
 <div class="section-grid">
 {{CONTENT}}
 </div>
 </div>
-<div class="footer">{{FOOTER_TEXT}} &mdash; Generated: {{GENERATION_DATE}}</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; {{GENERATION_DATE}}</div>
 </body>
 </html>
 """
@@ -1594,15 +1614,16 @@ def generate_index(folder: str) -> str:
             desc_html = f'<p>{html.escape(s)}</p>' if s else '<p></p>'
             cards_html += (
                 f'<a class="section-card" href="{html_name}">'
-                f'<div class="card-accent {accent}"></div>'
+                f'<div class="card-stripe {accent}"></div>'
                 f'<div class="card-body">'
-                f'<div class="card-icon">{icon}</div>'
-                f'<span class="card-lang {lang_cls}">{lang_label}</span>'
+                f'<div class="card-info">'
                 f'<h2>{html.escape(t)}</h2>'
                 f'{desc_html}'
-                f'<div class="card-meta">'
-                f'<span><strong>{lang_label}</strong> doc</span>'
                 f'</div>'
+                f'<div class="card-badges">'
+                f'<span class="card-badge lang-{lang_cls}">{lang_label}</span>'
+                f'</div>'
+                f'<span class="card-arrow">&rsaquo;</span>'
                 f'</div></a>\n'
             )
 
@@ -1624,15 +1645,16 @@ def generate_index(folder: str) -> str:
             icon = '&#128194;'
             cards_html += (
                 f'<a class="section-card" href="{d.name}/index.html">'
-                f'<div class="card-accent {accent}"></div>'
+                f'<div class="card-stripe {accent}"></div>'
                 f'<div class="card-body">'
-                f'<div class="card-icon">{icon}</div>'
-                f'<span class="card-lang {lang_cls}">{lang_label}</span>'
+                f'<div class="card-info">'
                 f'<h2>{d.name}</h2>'
                 f'<p>{md_count} document{"s" if md_count != 1 else ""}</p>'
-                f'<div class="card-meta">'
-                f'<span><strong>{md_count}</strong> doc{"s" if md_count != 1 else ""}</span>'
                 f'</div>'
+                f'<div class="card-badges">'
+                f'<span class="card-badge folder">{md_count} docs</span>'
+                f'</div>'
+                f'<span class="card-arrow">&rsaquo;</span>'
                 f'</div></a>\n'
             )
 
