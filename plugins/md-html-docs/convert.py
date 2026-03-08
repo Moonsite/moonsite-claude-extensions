@@ -132,6 +132,408 @@ document.querySelectorAll('.diagram-block').forEach(function(block){
 </script>
 """
 
+# ─── Sticky Notes (review annotations) ──────────────────────────────────────
+
+NOTES_CSS = """\
+/* ── Inline Review Notes (text-selection annotations) ── */
+mark.noted{background:#fef08a;border-bottom:2px solid #eab308;cursor:pointer;border-radius:2px;padding:0 1px;transition:background .15s}
+mark.noted:hover{background:#fde047}
+mark.noted.active{background:#fde047;box-shadow:0 0 0 2px rgba(234,179,8,.4)}
+.note-popup{position:absolute;z-index:200;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:.15rem;animation:noteIn .15s ease}
+.note-popup button{background:#eab308;color:#fff;border:none;border-radius:6px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:.3rem}
+.note-popup button:hover{background:#ca8a04}
+.note-editor{position:absolute;z-index:200;background:#fef9c3;border:1px solid #facc15;border-radius:10px;padding:.75rem;width:320px;box-shadow:0 6px 24px rgba(234,179,8,.2);animation:noteIn .2s ease}
+.note-editor textarea{width:100%;min-height:70px;border:1px solid #e5e7eb;border-radius:6px;padding:.5rem;font-family:inherit;font-size:.85rem;resize:vertical;background:#fffef5}
+.note-editor .note-selected{font-size:.75rem;color:#92400e;margin-bottom:.4rem;padding:.25rem .4rem;background:#fef3c7;border-radius:4px;max-height:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-editor .note-actions{display:flex;gap:.4rem;margin-top:.5rem;justify-content:flex-end}
+.note-editor .note-actions button{padding:.3rem .7rem;border-radius:5px;border:1px solid #d1d5db;cursor:pointer;font-size:.78rem;font-family:inherit}
+.note-editor .note-actions .note-save{background:#2563eb;color:#fff;border-color:#2563eb}
+.note-editor .note-actions .note-save:hover{background:#1d4ed8}
+.note-editor .note-actions .note-delete{background:#fff;color:#dc2626;border-color:#dc2626}
+.note-editor .note-actions .note-delete:hover{background:#fef2f2}
+.note-editor .note-actions .note-cancel{background:#fff;color:#6b7280}
+.note-editor .note-actions .note-cancel:hover{background:#f3f4f6}
+.notes-toggle{position:fixed;bottom:1.5rem;z-index:201;background:#eab308;color:#fff;border:none;border-radius:50%;width:52px;height:52px;font-size:1.4rem;cursor:pointer;box-shadow:0 3px 12px rgba(234,179,8,.4);transition:transform .2s;display:flex;align-items:center;justify-content:center}
+[dir="ltr"] .notes-toggle,.notes-toggle{right:5rem}
+[dir="rtl"] .notes-toggle{left:5rem;right:auto}
+.notes-toggle:hover{transform:scale(1.1)}
+.notes-toggle .badge{position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;border-radius:50%;width:20px;height:20px;font-size:.7rem;display:flex;align-items:center;justify-content:center;font-weight:700}
+.notes-toggle .badge:empty{display:none}
+.notes-panel{position:fixed;bottom:5rem;width:380px;max-height:60vh;z-index:201;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);display:none;flex-direction:column;overflow:hidden}
+[dir="ltr"] .notes-panel,.notes-panel{right:5rem}
+[dir="rtl"] .notes-panel{left:5rem;right:auto}
+.notes-panel.open{display:flex}
+.notes-panel-header{padding:.75rem 1rem;background:#fef9c3;border-bottom:1px solid #facc15;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:.9rem}
+.notes-panel-header .panel-actions{display:flex;gap:.5rem}
+.notes-panel-header button{background:none;border:none;cursor:pointer;font-size:.8rem;color:#2563eb;font-weight:500;padding:.1rem .3rem}
+.notes-panel-header button:hover{text-decoration:underline}
+.notes-panel-header .notes-clear{color:#dc2626}
+.notes-panel-body{overflow-y:auto;padding:.5rem;flex:1}
+.notes-panel-item{padding:.6rem .75rem;border-radius:6px;cursor:pointer;margin-bottom:.3rem;transition:background .15s;font-size:.85rem;border:1px solid transparent}
+.notes-panel-item:hover{background:#fef9c3;border-color:#facc15}
+.notes-panel-item .panel-quoted{font-size:.78rem;color:#92400e;background:#fef3c7;padding:.2rem .4rem;border-radius:4px;margin-bottom:.3rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notes-panel-item .panel-note{color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notes-panel-empty{padding:1.5rem;text-align:center;color:#9ca3af;font-size:.85rem;line-height:1.6}
+@keyframes noteIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@media print{mark.noted{background:#fef08a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:none}.note-popup,.note-editor,.notes-toggle,.notes-panel{display:none!important}}
+"""
+
+NOTES_JS = r"""
+<script>
+(function(){
+  var STORAGE_KEY='doc-notes:'+location.pathname;
+  var content=document.querySelector('.content');
+  if(!content)return;
+
+  // ── Storage ──
+  function loadNotes(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]}catch(e){return []}}
+  function saveNotes(arr){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(arr))}catch(e){}}
+  var allNotes=loadNotes();
+
+  // ── Text search: find a range in .content matching selectedText with context ──
+  function getTextNodes(root){
+    var nodes=[],walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null,false);
+    while(walker.nextNode())nodes.push(walker.currentNode);
+    return nodes;
+  }
+  function buildTextMap(nodes){
+    var text='',offsets=[];
+    for(var i=0;i<nodes.length;i++){offsets.push(text.length);text+=nodes[i].nodeValue}
+    return{text:text,offsets:offsets,nodes:nodes};
+  }
+  function findTextRange(map,selected,ctxBefore,ctxAfter){
+    var needle=ctxBefore+selected+ctxAfter;
+    var idx=map.text.indexOf(needle);
+    if(idx===-1){
+      // Fallback: try without context
+      idx=map.text.indexOf(selected);
+      if(idx===-1)return null;
+    }else{
+      idx+=ctxBefore.length;
+    }
+    var startOff=idx,endOff=idx+selected.length;
+    // Map flat offsets back to DOM nodes
+    var startNode,startLocal,endNode,endLocal;
+    for(var i=0;i<map.nodes.length;i++){
+      var nStart=map.offsets[i],nEnd=nStart+map.nodes[i].nodeValue.length;
+      if(startNode===undefined&&startOff<nEnd){startNode=map.nodes[i];startLocal=startOff-nStart}
+      if(endOff<=nEnd){endNode=map.nodes[i];endLocal=endOff-nStart;break}
+    }
+    if(!startNode||!endNode)return null;
+    var range=document.createRange();
+    range.setStart(startNode,startLocal);
+    range.setEnd(endNode,endLocal);
+    return range;
+  }
+
+  // ── Highlight a range and return the <mark> element ──
+  function highlightRange(range,noteId){
+    // Handle ranges that span multiple nodes by using extractContents
+    var frag=range.extractContents();
+    var mark=document.createElement('mark');
+    mark.className='noted';
+    mark.dataset.noteId=noteId;
+    mark.appendChild(frag);
+    range.insertNode(mark);
+    return mark;
+  }
+
+  // ── Get surrounding context from selection ──
+  function getContext(rangeObj,chars){
+    var map=buildTextMap(getTextNodes(content));
+    // Find where our selection sits in the full text
+    var tempRange=document.createRange();
+    tempRange.selectNodeContents(content);
+    tempRange.setEnd(rangeObj.startContainer,rangeObj.startOffset);
+    var beforeAll=tempRange.toString();
+    var before=beforeAll.slice(-chars);
+    tempRange.selectNodeContents(content);
+    tempRange.setStart(rangeObj.endContainer,rangeObj.endOffset);
+    var afterAll=tempRange.toString();
+    var after=afterAll.slice(0,chars);
+    return{before:before,after:after};
+  }
+
+  // ── Restore all saved highlights on load ──
+  function restoreNotes(){
+    var map=buildTextMap(getTextNodes(content));
+    allNotes.forEach(function(n,i){
+      var range=findTextRange(map,n.selectedText,n.ctxBefore||'',n.ctxAfter||'');
+      if(range){
+        var mark=highlightRange(range,n.id);
+        bindMark(mark,n);
+        // Rebuild map after DOM mutation
+        map=buildTextMap(getTextNodes(content));
+      }
+    });
+  }
+
+  // ── Bind click on a <mark> to open its note editor ──
+  function bindMark(mark,noteObj){
+    mark.onclick=function(e){
+      e.stopPropagation();
+      closeAllEditors();
+      mark.classList.add('active');
+      var rect=mark.getBoundingClientRect();
+      openEditor(rect,noteObj,mark);
+    };
+  }
+
+  // ── Close any open popups/editors ──
+  function closeAllEditors(){
+    document.querySelectorAll('.note-popup,.note-editor').forEach(function(el){el.remove()});
+    document.querySelectorAll('mark.noted.active').forEach(function(m){m.classList.remove('active')});
+  }
+
+  // ── Selection popup: appears when user selects text ──
+  function showPopup(rect,selRange){
+    closeAllEditors();
+    var popup=document.createElement('div');
+    popup.className='note-popup';
+    var btn=document.createElement('button');
+    btn.textContent='\uD83D\uDCDD Add Note';
+    popup.appendChild(btn);
+    document.body.appendChild(popup);
+    // Position above selection
+    var top=rect.top+window.scrollY-popup.offsetHeight-6;
+    var left=rect.left+window.scrollX+(rect.width/2)-(popup.offsetWidth/2);
+    popup.style.top=Math.max(0,top)+'px';
+    popup.style.left=Math.max(4,left)+'px';
+
+    btn.onclick=function(e){
+      e.stopPropagation();
+      popup.remove();
+      var selectedText=selRange.toString();
+      if(!selectedText.trim())return;
+      var ctx=getContext(selRange,30);
+      var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',createdAt:new Date().toISOString()};
+      var mark=highlightRange(selRange,noteObj.id);
+      var markRect=mark.getBoundingClientRect();
+      openEditor(markRect,noteObj,mark,true);
+    };
+  }
+
+  // ── Note editor: positioned near the highlight ──
+  function openEditor(rect,noteObj,mark,isNew){
+    var editor=document.createElement('div');
+    editor.className='note-editor';
+    // Show quoted text
+    var quoted=document.createElement('div');
+    quoted.className='note-selected';
+    quoted.textContent='\u201C'+noteObj.selectedText.slice(0,80)+(noteObj.selectedText.length>80?'\u2026':'')+'\u201D';
+    editor.appendChild(quoted);
+
+    var ta=document.createElement('textarea');
+    ta.placeholder='Your review note\u2026';
+    ta.value=noteObj.note||'';
+    editor.appendChild(ta);
+
+    var actions=document.createElement('div');
+    actions.className='note-actions';
+    var saveBtn=document.createElement('button');
+    saveBtn.className='note-save';
+    saveBtn.textContent='Save';
+    var cancelBtn=document.createElement('button');
+    cancelBtn.className='note-cancel';
+    cancelBtn.textContent='Cancel';
+    var delBtn=document.createElement('button');
+    delBtn.className='note-delete';
+    delBtn.textContent='Delete';
+
+    saveBtn.onclick=function(){
+      var text=ta.value.trim();
+      if(!text){
+        removeNote(noteObj.id,mark,editor);
+        return;
+      }
+      noteObj.note=text;
+      // Upsert in storage
+      var idx=allNotes.findIndex(function(n){return n.id===noteObj.id});
+      if(idx>=0){allNotes[idx]=noteObj}else{allNotes.push(noteObj)}
+      saveNotes(allNotes);
+      bindMark(mark,noteObj);
+      editor.remove();
+      mark.classList.remove('active');
+      updateBadge();
+    };
+    cancelBtn.onclick=function(){
+      editor.remove();
+      mark.classList.remove('active');
+      if(isNew){
+        // Unwrap mark since note was never saved
+        unwrapMark(mark);
+      }
+    };
+    delBtn.onclick=function(){removeNote(noteObj.id,mark,editor)};
+
+    actions.appendChild(saveBtn);
+    if(!isNew)actions.appendChild(delBtn);
+    actions.appendChild(cancelBtn);
+    editor.appendChild(actions);
+    document.body.appendChild(editor);
+
+    // Position below the highlight
+    var top=rect.bottom+window.scrollY+6;
+    var left=rect.left+window.scrollX;
+    // Keep within viewport
+    if(left+320>window.innerWidth)left=window.innerWidth-330;
+    if(left<4)left=4;
+    editor.style.top=top+'px';
+    editor.style.left=left+'px';
+    ta.focus();
+  }
+
+  function removeNote(id,mark,editor){
+    allNotes=allNotes.filter(function(n){return n.id!==id});
+    saveNotes(allNotes);
+    unwrapMark(mark);
+    if(editor)editor.remove();
+    updateBadge();
+  }
+
+  function unwrapMark(mark){
+    var parent=mark.parentNode;
+    while(mark.firstChild)parent.insertBefore(mark.firstChild,mark);
+    parent.removeChild(mark);
+    parent.normalize(); // merge adjacent text nodes
+  }
+
+  // ── Listen for text selection in .content ──
+  var popupTimeout;
+  document.addEventListener('mouseup',function(e){
+    if(e.target.closest('.note-popup,.note-editor,.notes-panel'))return;
+    clearTimeout(popupTimeout);
+    popupTimeout=setTimeout(function(){
+      var sel=window.getSelection();
+      if(!sel||sel.isCollapsed||!sel.rangeCount)return;
+      var range=sel.getRangeAt(0);
+      // Only within .content, not in our own UI
+      if(!content.contains(range.commonAncestorContainer))return;
+      if(range.toString().trim().length<2)return;
+      var rect=range.getBoundingClientRect();
+      showPopup(rect,range.cloneRange());
+    },200);
+  });
+
+  // Dismiss popup/editor on click outside
+  document.addEventListener('mousedown',function(e){
+    if(!e.target.closest('.note-popup,.note-editor,.notes-panel,.notes-toggle,mark.noted')){
+      closeAllEditors();
+    }
+  });
+
+  // ── Floating toggle button + notes panel ──
+  var toggleBtn=document.createElement('button');
+  toggleBtn.className='notes-toggle';
+  toggleBtn.textContent='\uD83D\uDCDD';
+  toggleBtn.title='Review notes';
+  var badge=document.createElement('span');
+  badge.className='badge';
+  toggleBtn.appendChild(badge);
+  document.body.appendChild(toggleBtn);
+
+  var panel=document.createElement('div');
+  panel.className='notes-panel';
+  var panelHeader=document.createElement('div');
+  panelHeader.className='notes-panel-header';
+  var headerLabel=document.createElement('span');
+  headerLabel.textContent='Review Notes';
+  panelHeader.appendChild(headerLabel);
+  var panelActions=document.createElement('div');
+  panelActions.className='panel-actions';
+  var exportBtn=document.createElement('button');
+  exportBtn.textContent='Export MD';
+  exportBtn.onclick=exportNotes;
+  panelActions.appendChild(exportBtn);
+  var clearBtn=document.createElement('button');
+  clearBtn.className='notes-clear';
+  clearBtn.textContent='Clear All';
+  clearBtn.onclick=function(){
+    if(!confirm('Remove all notes from this page?'))return;
+    allNotes=[];
+    saveNotes(allNotes);
+    document.querySelectorAll('mark.noted').forEach(unwrapMark);
+    updateBadge();
+    renderPanel();
+  };
+  panelActions.appendChild(clearBtn);
+  panelHeader.appendChild(panelActions);
+  panel.appendChild(panelHeader);
+  var panelBody=document.createElement('div');
+  panelBody.className='notes-panel-body';
+  panel.appendChild(panelBody);
+  document.body.appendChild(panel);
+
+  toggleBtn.onclick=function(e){
+    e.stopPropagation();
+    panel.classList.toggle('open');
+    if(panel.classList.contains('open'))renderPanel();
+  };
+
+  function updateBadge(){
+    badge.textContent=allNotes.length||'';
+  }
+
+  function renderPanel(){
+    allNotes=loadNotes();
+    panelBody.textContent='';
+    if(!allNotes.length){
+      var empty=document.createElement('div');
+      empty.className='notes-panel-empty';
+      empty.textContent='No notes yet.\nSelect any text and click the note icon to annotate.';
+      panelBody.appendChild(empty);
+      return;
+    }
+    allNotes.forEach(function(n){
+      var item=document.createElement('div');
+      item.className='notes-panel-item';
+      var q=document.createElement('div');
+      q.className='panel-quoted';
+      q.textContent='\u201C'+n.selectedText.slice(0,60)+(n.selectedText.length>60?'\u2026':'')+'\u201D';
+      item.appendChild(q);
+      var t=document.createElement('div');
+      t.className='panel-note';
+      t.textContent=n.note.split('\n')[0];
+      item.appendChild(t);
+      item.onclick=function(){
+        panel.classList.remove('open');
+        var mark=document.querySelector('mark.noted[data-note-id="'+n.id+'"]');
+        if(mark){
+          mark.scrollIntoView({behavior:'smooth',block:'center'});
+          mark.classList.add('active');
+          setTimeout(function(){mark.click()},400);
+        }
+      };
+      panelBody.appendChild(item);
+    });
+  }
+
+  function exportNotes(){
+    var notes=loadNotes();
+    var lines=['# Review Notes','','**Document:** '+document.title,'**Date:** '+new Date().toLocaleDateString(),''];
+    notes.forEach(function(n){
+      lines.push('---');
+      lines.push('');
+      lines.push('> '+n.selectedText.replace(/\n/g,'\n> '));
+      lines.push('');
+      lines.push(n.note);
+      lines.push('');
+    });
+    var blob=new Blob([lines.join('\n')],{type:'text/markdown'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='review-notes-'+document.title.replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'.md';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ── Init ──
+  restoreNotes();
+  updateBadge();
+})();
+</script>
+"""
+
 # ─── Config loading ──────────────────────────────────────────────────────────
 
 def load_config(start_dir, title=''):
@@ -217,6 +619,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-left:2px solid transparent;margin-bottom:.15rem;border-radius:0 4px 4px 0;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
+.sidebar a.toc-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600}
 .sidebar a.h3-link{padding-left:1.25rem;font-size:.8rem;color:var(--muted)}
 .index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
 .index-link:hover{text-decoration:underline}
@@ -296,6 +699,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
   .content{padding:1.5rem}
 }
 {{DIAGRAM_CSS}}
+{{NOTES_CSS}}
 </style>
 </head>
 <body>
@@ -347,11 +751,40 @@ function setLayout(mode){
 }
 (function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
 </script>
+<script>
+(function(){
+  var headings=document.querySelectorAll('.content h2[id], .content h3[id], .content h4[id]');
+  if(!headings.length)return;
+  var sidebar=document.getElementById('sidebar');
+  if(!sidebar)return;
+  var tocLinks=sidebar.querySelectorAll('a[href^="#"]');
+  var linkMap={};
+  tocLinks.forEach(function(a){linkMap[a.getAttribute('href').slice(1)]=a});
+  var current=null;
+  var observer=new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(entry.isIntersecting){
+        if(current)current.classList.remove('toc-active');
+        var link=linkMap[entry.target.id];
+        if(link){link.classList.add('toc-active');current=link;
+          // Open parent details if collapsed
+          var det=link.closest('details');
+          if(det)det.open=true;
+          // Scroll sidebar to keep active link visible
+          link.scrollIntoView({block:'nearest',behavior:'smooth'});
+        }
+      }
+    });
+  },{rootMargin:'-80px 0px -60% 0px',threshold:0});
+  headings.forEach(function(h){observer.observe(h)});
+})();
+</script>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 mermaid.initialize({startOnLoad:true,theme:'dark'});
 </script>
 {{DIAGRAM_SCRIPTS}}
+{{NOTES_JS}}
 </body>
 </html>
 """
@@ -388,6 +821,7 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-right:2px solid transparent;border-left:none;margin-bottom:.15rem;border-radius:4px 0 0 4px;padding-right:.75rem;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
+.sidebar a.toc-active{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light);font-weight:600}
 .sidebar a.h3-link{padding-right:1.25rem;font-size:.8rem;color:var(--muted)}
 .index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
 .index-link:hover{text-decoration:underline}
@@ -470,6 +904,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
   .content{padding:1.5rem}
 }
 {{DIAGRAM_CSS}}
+{{NOTES_CSS}}
 </style>
 </head>
 <body>
@@ -521,11 +956,38 @@ function setLayout(mode){
 }
 (function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
 </script>
+<script>
+(function(){
+  var headings=document.querySelectorAll('.content h2[id], .content h3[id], .content h4[id]');
+  if(!headings.length)return;
+  var sidebar=document.getElementById('sidebar');
+  if(!sidebar)return;
+  var tocLinks=sidebar.querySelectorAll('a[href^="#"]');
+  var linkMap={};
+  tocLinks.forEach(function(a){linkMap[a.getAttribute('href').slice(1)]=a});
+  var current=null;
+  var observer=new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(entry.isIntersecting){
+        if(current)current.classList.remove('toc-active');
+        var link=linkMap[entry.target.id];
+        if(link){link.classList.add('toc-active');current=link;
+          var det=link.closest('details');
+          if(det)det.open=true;
+          link.scrollIntoView({block:'nearest',behavior:'smooth'});
+        }
+      }
+    });
+  },{rootMargin:'-80px 0px -60% 0px',threshold:0});
+  headings.forEach(function(h){observer.observe(h)});
+})();
+</script>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 mermaid.initialize({startOnLoad:true,theme:'default'});
 </script>
 {{DIAGRAM_SCRIPTS}}
+{{NOTES_JS}}
 </body>
 </html>
 """
@@ -988,7 +1450,9 @@ def convert_file(md_path: str) -> str:
              .replace('{{BADGE_TEXT}}', html.escape(badge_text) if badge_text else '')
              .replace('{{FOOTER_TEXT}}', html.escape(config['footerText']))
              .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
-             .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else ''))
+             .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else '')
+             .replace('{{NOTES_CSS}}', NOTES_CSS if config.get('enableNotes', True) else '')
+             .replace('{{NOTES_JS}}', NOTES_JS if config.get('enableNotes', True) else ''))
 
     # Apply config-driven accent colors to :root CSS variables
     css_overrides = {

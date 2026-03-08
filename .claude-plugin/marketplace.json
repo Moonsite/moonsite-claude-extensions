@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.1.2",
+    "version": "1.2.0",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -14,7 +14,7 @@
       "name": "jira-autopilot",
       "source": "./plugins/jira-autopilot",
       "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
-      "version": "4.0.2",
+      "version": "4.0.3",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -34,7 +34,7 @@
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
       "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
-      "version": "2.2.2",
+      "version": "2.3.0",
       "author": {
         "name": "Boris Sigalov"
       },
