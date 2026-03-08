@@ -465,8 +465,6 @@ def cmd_session_start():
             del active[key]
             if session.get("currentIssue") == key:
                 session["currentIssue"] = None
-
-        save_session(root, session)
     else:
         # New session
         session = _new_session()
@@ -475,7 +473,8 @@ def cmd_session_start():
         if "accuracy" in cfg:
             session["accuracy"] = cfg["accuracy"]
 
-        # Detect issue from git branch
+    # Auto-detect issue from git branch whenever no issue is active
+    if not session.get("currentIssue") and not session.get("activeIssues"):
         branch_pattern = cfg.get("branchPattern")
         if branch_pattern:
             try:
@@ -487,17 +486,17 @@ def cmd_session_start():
                 if match:
                     issue_key = match.group(1)
                     session["currentIssue"] = issue_key
-                    if issue_key not in session["activeIssues"]:
-                        session["activeIssues"][issue_key] = {
-                            "summary": f"From branch: {branch}",
-                            "startTime": int(time.time()),
-                            "totalSeconds": 0,
-                            "paused": False,
-                        }
+                    session["activeIssues"][issue_key] = {
+                        "summary": f"From branch: {branch}",
+                        "startTime": int(time.time()),
+                        "totalSeconds": 0,
+                        "paused": False,
+                    }
+                    debug_log(f"session-start: auto-linked {issue_key} from branch {branch}", root)
             except (subprocess.CalledProcessError, OSError, IndexError):
                 pass
 
-        save_session(root, session)
+    save_session(root, session)
 
     debug_log(f"session-start: session={session.get('sessionId')}", root)
 
