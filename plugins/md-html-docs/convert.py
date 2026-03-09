@@ -212,6 +212,24 @@ NOTES_JS = r"""
   function saveNotes(arr){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(arr))}catch(e){}}
   var allNotes=loadNotes();
 
+  // ── Find line:col in original markdown source ──
+  var mdSourceEl=document.getElementById('md-source');
+  var mdSource=mdSourceEl?mdSourceEl.textContent:'';
+  function findMdLocation(selectedText,ctxBefore,ctxAfter){
+    if(!mdSource||!selectedText)return null;
+    // Try with context first, then plain text
+    var needle=ctxBefore+selectedText+ctxAfter;
+    var idx=mdSource.indexOf(needle);
+    if(idx!==-1){idx+=ctxBefore.length}
+    else{idx=mdSource.indexOf(selectedText);if(idx===-1)return null}
+    // Count line and column
+    var before=mdSource.substring(0,idx);
+    var line=before.split('\\n').length;
+    var lastNl=before.lastIndexOf('\\n');
+    var col=lastNl===-1?idx+1:idx-lastNl;
+    return{line:line,col:col,index:idx};
+  }
+
   // ── Text search: find a range in .content matching selectedText with context ──
   function getTextNodes(root){
     var nodes=[],walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null,false);
@@ -245,7 +263,8 @@ NOTES_JS = r"""
   // ── Highlight: wraps each text node segment individually for cross-element safety ──
   function highlightRange(range,noteId){
     var nodes=getTextNodes(content);
-    var started=false,marks=[];
+    var started=false,segments=[];
+    // Phase 1: collect segments (no DOM mutation)
     for(var i=0;i<nodes.length;i++){
       var n=nodes[i],nLen=n.nodeValue.length;
       var segStart=0,segEnd=nLen;
@@ -253,18 +272,23 @@ NOTES_JS = r"""
       if(!started)continue;
       if(n===range.endContainer){segEnd=range.endOffset}
       if(segStart>=segEnd){if(n===range.endContainer)break;continue}
-      // Split and wrap this segment
-      var r=document.createRange();
-      r.setStart(n,segStart);
-      r.setEnd(n,segEnd);
-      var mark=document.createElement('mark');
-      mark.className='noted';
-      mark.dataset.noteId=noteId;
-      r.surroundContents(mark);
-      marks.push(mark);
-      // After surroundContents, the walker is invalidated; re-fetch nodes
-      nodes=getTextNodes(content);
+      segments.push({node:n,start:segStart,end:segEnd});
       if(n===range.endContainer)break;
+    }
+    // Phase 2: wrap in reverse order to preserve node positions
+    var marks=[];
+    for(var j=segments.length-1;j>=0;j--){
+      try{
+        var seg=segments[j];
+        var r=document.createRange();
+        r.setStart(seg.node,seg.start);
+        r.setEnd(seg.node,seg.end);
+        var mark=document.createElement('mark');
+        mark.className='noted';
+        mark.dataset.noteId=noteId;
+        r.surroundContents(mark);
+        marks.unshift(mark);
+      }catch(e){}
     }
     return marks[0]||null;
   }
@@ -285,19 +309,21 @@ NOTES_JS = r"""
 
   // ── Restore all saved highlights on load ──
   function restoreNotes(){
-    var map=buildTextMap(getTextNodes(content));
-    allNotes.forEach(function(n){
-      var range=findTextRange(map,n.selectedText,n.ctxBefore||'',n.ctxAfter||'');
-      if(range){
-        highlightRange(range,n.id);
-        map=buildTextMap(getTextNodes(content));
-      }
-    });
-    // Bind all marks after restore
-    document.querySelectorAll('mark.noted').forEach(function(mark){
-      var nObj=allNotes.find(function(x){return x.id===mark.dataset.noteId});
-      if(nObj)bindMark(mark,nObj);
-    });
+    try{
+      var map=buildTextMap(getTextNodes(content));
+      allNotes.forEach(function(n){
+        if(n.type==='heading')return;
+        var range=findTextRange(map,n.selectedText,n.ctxBefore||'',n.ctxAfter||'');
+        if(range){
+          highlightRange(range,n.id);
+          map=buildTextMap(getTextNodes(content));
+        }
+      });
+      document.querySelectorAll('mark.noted').forEach(function(mark){
+        var nObj=allNotes.find(function(x){return x.id===mark.dataset.noteId});
+        if(nObj)bindMark(mark,nObj);
+      });
+    }catch(e){console.warn('Note restore failed:',e)}
   }
 
   // ── Bind click on a <mark> to open its note editor ──
@@ -339,7 +365,8 @@ NOTES_JS = r"""
       if(!selectedText.trim())return;
       var ctx=getContext(selRange,30);
       var heading=findNearestHeading(selRange.startContainer);
-      var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),type:'text',selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',section:heading.text,sectionId:heading.id,createdAt:new Date().toISOString()};
+      var loc=findMdLocation(selectedText,ctx.before,ctx.after);
+      var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),type:'text',selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',section:heading.text,sectionId:heading.id,mdLine:loc?loc.line:null,mdCol:loc?loc.col:null,mdIndex:loc?loc.index:null,createdAt:new Date().toISOString()};
       var firstMark=highlightRange(selRange,noteObj.id);
       if(!firstMark)return;
       window.getSelection().removeAllRanges();
@@ -623,7 +650,8 @@ NOTES_JS = r"""
         if(n.type==='heading'){
           lines.push('**[Section note]**');
         }else{
-          lines.push('> '+n.selectedText.replace(/\n/g,'\n> '));
+          var ref=n.mdLine?(' *(line '+n.mdLine+', col '+n.mdCol+')*'):'';
+          lines.push('> '+n.selectedText.replace(/\n/g,'\n> ')+ref);
         }
         lines.push('');
         lines.push(n.note);
@@ -775,26 +803,28 @@ LTR_TEMPLATE = """\
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
 
 /* ── Header ── */
-.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
-.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
-.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
-.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
-.header-badge:empty,.org:empty{display:none}
+.site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.logo-circle{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;letter-spacing:.5px;flex-shrink:0}
+.site-header .header-text h1{font-size:1rem;font-weight:600;margin:0;line-height:1.3}
+.site-header .header-text .org{font-size:.75rem;opacity:.8;margin:0}
+.doc-title{font-size:.85rem;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+.header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
+.header-index:hover{background:rgba(255,255,255,.25);color:#fff}
+.org:empty{display:none}
 
 /* ── Layout ── */
-.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
+.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
 
 /* ── Sidebar ── */
-.sidebar{position:sticky;top:0;height:calc(100vh - 70px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:1px solid var(--border)}
+.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:1px solid var(--border)}
 .sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
 .sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-left:2px solid transparent;margin-bottom:.15rem;border-radius:0 4px 4px 0;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
 .sidebar a.toc-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600}
 .sidebar a.h3-link{padding-left:1.25rem;font-size:.8rem;color:var(--muted)}
-.index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
-.index-link:hover{text-decoration:underline}
 /* ── Collapsible TOC ── */
 .sidebar details{margin-bottom:.15rem}
 .sidebar details summary{list-style:none;cursor:pointer}
@@ -803,7 +833,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar details[open] summary::before{transform:rotate(90deg)}
 .sidebar details summary a{display:inline}
 /* ── Layout switcher ── */
-.layout-toolbar{margin-left:auto;display:flex;gap:.3rem;align-items:center}
+.layout-toolbar{display:flex;gap:.3rem;align-items:center}
 .layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
 .layout-toolbar button:hover{background:rgba(255,255,255,.25)}
 .layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
@@ -811,7 +841,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .page.layout-wide .content{max-width:1200px}
 .page.layout-wide{max-width:1600px}
 .page.layout-fluid{max-width:100%;margin:0;padding:0;display:block}
-.page.layout-fluid .sidebar{position:fixed;top:70px;left:0;width:280px;height:calc(100vh - 70px);z-index:10}
+.page.layout-fluid .sidebar{position:fixed;top:56px;left:0;width:280px;height:calc(100vh - 56px);z-index:10}
 .page.layout-fluid .content{max-width:100%;margin-left:280px;padding:2.5rem 3rem}
 
 /* ── Mobile TOC toggle ── */
@@ -881,17 +911,19 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
     <h1>{{PROJECT_NAME}}</h1>
     <div class="org">{{ORG_NAME}}</div>
   </div>
-  <div class="header-badge">{{BADGE_TEXT}}</div>
-  <div class="layout-toolbar">
-    <button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
-    <button onclick="setLayout('wide')" id="btn-wide">Wide</button>
-    <button onclick="setLayout('fluid')" id="btn-fluid">Full</button>
+  <span class="doc-title">{{TITLE}}</span>
+  <div class="header-right">
+    <a href="index.html" class="header-index">&#128196; Index</a>
+    <div class="layout-toolbar">
+      <button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
+      <button onclick="setLayout('wide')" id="btn-wide">Wide</button>
+      <button onclick="setLayout('fluid')" id="btn-fluid">Full</button>
+    </div>
   </div>
 </header>
 <div class="page">
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-card">
-    <a href="index.html" class="index-link">&#128196; Index</a>
     <h3>Contents</h3>
     {{TOC}}
   </div>
@@ -903,6 +935,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <div class="date">{{GENERATION_DATE}}</div>
 </div>
 {{CONTENT}}
+<script type="text/plain" id="md-source">{{MD_SOURCE}}</script>
 <div class="footer">
   <span>{{FOOTER_TEXT}}</span>
   <span>Generated: {{GENERATION_DATE}}</span>
@@ -977,26 +1010,28 @@ RTL_TEMPLATE = """\
 body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.8;direction:rtl}
 
 /* ── Header ── */
-.site-header{background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;letter-spacing:.5px;flex-shrink:0}
-.site-header .header-text h1{font-size:1.1rem;font-weight:600;margin:0;line-height:1.3}
-.site-header .header-text .org{font-size:.8rem;opacity:.8;margin:0}
-.header-badge{margin-left:auto;background:rgba(255,255,255,.18);padding:.3rem .75rem;border-radius:20px;font-size:.75rem;font-weight:500;letter-spacing:.3px}
-.header-badge:empty,.org:empty{display:none}
+.site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.logo-circle{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;letter-spacing:.5px;flex-shrink:0}
+.site-header .header-text h1{font-size:1rem;font-weight:600;margin:0;line-height:1.3}
+.site-header .header-text .org{font-size:.75rem;opacity:.8;margin:0}
+.doc-title{font-size:.85rem;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+.header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
+.header-index:hover{background:rgba(255,255,255,.25);color:#fff}
+.org:empty{display:none}
 
 /* ── Layout ── */
-.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 70px)}
+.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
 
 /* ── Sidebar ── */
-.sidebar{position:sticky;top:0;height:calc(100vh - 70px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
+.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
 .sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
 .sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
 .sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-right:2px solid transparent;border-left:none;margin-bottom:.15rem;border-radius:4px 0 0 4px;padding-right:.75rem;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
 .sidebar a.toc-active{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light);font-weight:600}
 .sidebar a.h3-link{padding-right:1.25rem;font-size:.8rem;color:var(--muted)}
-.index-link{display:block;padding:.5rem .5rem .75rem;font-weight:600;font-size:.85rem;color:var(--accent)!important;border-bottom:1px solid var(--border);margin-bottom:.5rem;text-decoration:none}
-.index-link:hover{text-decoration:underline}
 /* ── Collapsible TOC ── */
 .sidebar details{margin-bottom:.15rem}
 .sidebar details summary{list-style:none;cursor:pointer}
@@ -1005,7 +1040,7 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .sidebar details[open] summary::before{transform:rotate(-90deg)}
 .sidebar details summary a{display:inline}
 /* ── Layout switcher ── */
-.layout-toolbar{margin-left:auto;display:flex;gap:.3rem;align-items:center}
+.layout-toolbar{display:flex;gap:.3rem;align-items:center}
 .layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
 .layout-toolbar button:hover{background:rgba(255,255,255,.25)}
 .layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
@@ -1013,7 +1048,7 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .page.layout-wide .content{max-width:1200px}
 .page.layout-wide{max-width:1600px}
 .page.layout-fluid{max-width:100%;margin:0;padding:0;display:block}
-.page.layout-fluid .sidebar{position:fixed;top:70px;right:0;width:280px;height:calc(100vh - 70px);z-index:10}
+.page.layout-fluid .sidebar{position:fixed;top:56px;right:0;width:280px;height:calc(100vh - 56px);z-index:10}
 .page.layout-fluid .content{max-width:100%;margin-right:280px;padding:2.5rem 3rem}
 
 /* ── Mobile TOC toggle ── */
@@ -1086,17 +1121,19 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
     <h1>{{PROJECT_NAME}}</h1>
     <div class="org">{{ORG_NAME}}</div>
   </div>
-  <div class="header-badge">{{BADGE_TEXT}}</div>
-  <div class="layout-toolbar">
-    <button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
-    <button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
-    <button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
+  <span class="doc-title">{{TITLE}}</span>
+  <div class="header-right">
+    <a href="index.html" class="header-index">&#128196; &#1488;&#1497;&#1504;&#1491;&#1511;&#1505;</a>
+    <div class="layout-toolbar">
+      <button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
+      <button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
+      <button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
+    </div>
   </div>
 </header>
 <div class="page">
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-card">
-    <a href="index.html" class="index-link">&#128196; &#1488;&#1497;&#1504;&#1491;&#1511;&#1505;</a>
     <h3>&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</h3>
     {{TOC}}
   </div>
@@ -1108,6 +1145,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <div class="date">{{GENERATION_DATE}}</div>
 </div>
 {{CONTENT}}
+<script type="text/plain" id="md-source">{{MD_SOURCE}}</script>
 <div class="footer">
   <span>{{FOOTER_TEXT}}</span>
   <span>Generated: {{GENERATION_DATE}}</span>
@@ -1669,6 +1707,7 @@ def convert_file(md_path: str) -> str:
              .replace('{{SUBTITLE}}', html.escape(subtitle))
              .replace('{{TOC}}', toc_html)
              .replace('{{CONTENT}}', content_html)
+             .replace('{{MD_SOURCE}}', html.escape(body_without_fm))
              .replace('{{GENERATION_DATE}}', gen_date)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
              .replace('{{ORG_NAME}}', html.escape(org_name) if org_name else '')
