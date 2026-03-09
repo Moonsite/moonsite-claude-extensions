@@ -1281,8 +1281,14 @@ def md_to_html(md: str) -> tuple:
         """Process inline markdown: bold, italic, code, links, images, checkboxes."""
         # Images: ![alt](src)
         text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', r'<img src="\2" alt="\1">', text)
-        # Links: [text](url)
-        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+        # Links: [text](url) — rewrite local .md links to .html
+        def _rewrite_link(m):
+            label, url = m.group(1), m.group(2)
+            # Split anchor: foo.md#section → foo.html#section
+            if not url.startswith(('http://', 'https://', 'mailto:', '#')):
+                url = re.sub(r'\.md(#|$)', r'.html\1', url)
+            return f'<a href="{url}">{label}</a>'
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _rewrite_link, text)
         # Inline code (must be before bold/italic)
         text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
         # Bold + italic
