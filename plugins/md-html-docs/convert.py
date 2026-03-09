@@ -191,8 +191,13 @@ mark.noted.active{background:#fde047;box-shadow:0 0 0 2px rgba(234,179,8,.4)}
 .notes-panel-item .panel-quoted{font-size:.78rem;color:#92400e;background:#fef3c7;padding:.2rem .4rem;border-radius:4px;margin-bottom:.3rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notes-panel-item .panel-note{color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notes-panel-empty{padding:1.5rem;text-align:center;color:#9ca3af;font-size:.85rem;line-height:1.6}
+.heading-note-btn{opacity:0;cursor:pointer;background:none;border:none;font-size:.85rem;padding:.15rem .3rem;border-radius:4px;transition:opacity .15s,background .15s;vertical-align:middle;margin:0 .3rem}
+h1:hover .heading-note-btn,h2:hover .heading-note-btn,h3:hover .heading-note-btn,h4:hover .heading-note-btn{opacity:.5}
+.heading-note-btn:hover{opacity:1!important;background:#fef3c7}
+.heading-note-btn.has-note{opacity:.7;color:#eab308}
+.notes-panel-item .panel-section{font-size:.72rem;color:#6366f1;font-weight:500;margin-bottom:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @keyframes noteIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-@media print{mark.noted{background:#fef08a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:none}.note-popup,.note-editor,.notes-toggle,.notes-panel{display:none!important}}
+@media print{mark.noted{background:#fef08a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:none}.note-popup,.note-editor,.notes-toggle,.notes-panel,.heading-note-btn{display:none!important}}
 """
 
 NOTES_JS = r"""
@@ -333,7 +338,8 @@ NOTES_JS = r"""
       var selectedText=selRange.toString();
       if(!selectedText.trim())return;
       var ctx=getContext(selRange,30);
-      var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',createdAt:new Date().toISOString()};
+      var heading=findNearestHeading(selRange.startContainer);
+      var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),type:'text',selectedText:selectedText,ctxBefore:ctx.before,ctxAfter:ctx.after,note:'',section:heading.text,sectionId:heading.id,createdAt:new Date().toISOString()};
       var firstMark=highlightRange(selRange,noteObj.id);
       if(!firstMark)return;
       window.getSelection().removeAllRanges();
@@ -542,6 +548,7 @@ NOTES_JS = r"""
 
   function updateBadge(){
     badge.textContent=allNotes.length||'';
+    updateHeadingButtons();
   }
 
   function renderPanel(){
@@ -565,6 +572,14 @@ NOTES_JS = r"""
       item.appendChild(cb);
       var itemContent=document.createElement('div');
       itemContent.className='panel-item-content';
+      // Show section context
+      var sectionLabel=n.type==='heading'?n.headingText:(n.section||'');
+      if(sectionLabel){
+        var sec=document.createElement('div');
+        sec.className='panel-section';
+        sec.textContent=(n.type==='heading'?'\uD83D\uDCCC ':'\u00A7 ')+sectionLabel;
+        itemContent.appendChild(sec);
+      }
       var q=document.createElement('div');
       q.className='panel-quoted';
       q.textContent='\u201C'+n.selectedText.slice(0,60)+(n.selectedText.length>60?'\u2026':'')+'\u201D';
@@ -590,13 +605,30 @@ NOTES_JS = r"""
   function exportNotes(){
     var notes=loadNotes();
     var lines=['# Review Notes','','**Document:** '+document.title,'**Date:** '+new Date().toLocaleDateString(),''];
+    // Group notes by section
+    var sections={};var order=[];
     notes.forEach(function(n){
-      lines.push('---');
-      lines.push('');
-      lines.push('> '+n.selectedText.replace(/\n/g,'\n> '));
-      lines.push('');
-      lines.push(n.note);
-      lines.push('');
+      var sec=n.type==='heading'?(n.headingText||'General'):(n.section||'General');
+      if(!sections[sec]){sections[sec]=[];order.push(sec)}
+      sections[sec].push(n);
+    });
+    order.forEach(function(sec){
+      if(sec!=='General'){
+        lines.push('---');
+        lines.push('');
+        lines.push('## '+sec);
+        lines.push('');
+      }
+      sections[sec].forEach(function(n){
+        if(n.type==='heading'){
+          lines.push('**[Section note]**');
+        }else{
+          lines.push('> '+n.selectedText.replace(/\n/g,'\n> '));
+        }
+        lines.push('');
+        lines.push(n.note);
+        lines.push('');
+      });
     });
     var blob=new Blob([lines.join('\n')],{type:'text/markdown'});
     var a=document.createElement('a');
@@ -606,8 +638,69 @@ NOTES_JS = r"""
     URL.revokeObjectURL(a.href);
   }
 
+  // ── Find nearest heading above a DOM node ──
+  function findNearestHeading(node){
+    var el=node.nodeType===3?node.parentNode:node;
+    // Walk backwards through preceding siblings and parents to find h1-h4
+    while(el&&content.contains(el)){
+      // Check preceding siblings
+      var sib=el.previousElementSibling;
+      while(sib){
+        if(/^H[1-4]$/i.test(sib.tagName))return{id:sib.id||'',text:sib.textContent.replace(/\uD83D\uDCDD/g,'').trim()};
+        sib=sib.previousElementSibling;
+      }
+      // Check if el itself is a heading
+      if(/^H[1-4]$/i.test(el.tagName))return{id:el.id||'',text:el.textContent.replace(/\uD83D\uDCDD/g,'').trim()};
+      el=el.parentNode;
+    }
+    return{id:'',text:''};
+  }
+
+  // ── Add note buttons to all headings ──
+  function addHeadingButtons(){
+    content.querySelectorAll('h1,h2,h3,h4').forEach(function(h){
+      if(h.querySelector('.heading-note-btn'))return;
+      var btn=document.createElement('button');
+      btn.className='heading-note-btn';
+      btn.textContent='\uD83D\uDCDD';
+      btn.title='Add note to this section';
+      // Check if heading already has a note
+      var hText=h.textContent.trim();
+      var existing=allNotes.find(function(n){return n.type==='heading'&&n.headingId===h.id});
+      if(existing)btn.classList.add('has-note');
+      btn.onclick=function(e){
+        e.stopPropagation();
+        e.preventDefault();
+        closeAllEditors();
+        var headingText=h.textContent.replace(/\uD83D\uDCDD/g,'').trim();
+        // Check if note exists for this heading
+        var existingNote=allNotes.find(function(n){return n.type==='heading'&&n.headingId===h.id});
+        if(existingNote){
+          var rect=h.getBoundingClientRect();
+          openEditor(rect,existingNote,existingNote.id);
+        }else{
+          var noteObj={id:Date.now().toString(36)+Math.random().toString(36).substr(2,4),type:'heading',headingId:h.id,headingText:headingText,selectedText:headingText,ctxBefore:'',ctxAfter:'',note:'',createdAt:new Date().toISOString()};
+          var rect=h.getBoundingClientRect();
+          openEditor(rect,noteObj,noteObj.id,true);
+        }
+      };
+      h.appendChild(btn);
+    });
+  }
+
+  // ── Update heading button states ──
+  function updateHeadingButtons(){
+    content.querySelectorAll('.heading-note-btn').forEach(function(btn){
+      var h=btn.parentNode;
+      var existing=allNotes.find(function(n){return n.type==='heading'&&n.headingId===h.id});
+      if(existing)btn.classList.add('has-note');
+      else btn.classList.remove('has-note');
+    });
+  }
+
   // ── Init ──
   restoreNotes();
+  addHeadingButtons();
   updateBadge();
 })();
 </script>
@@ -1109,6 +1202,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .card-badge.lang-he{background:#ecfdf5;color:#059669}
 .card-badge.lang-en{background:#eef2ff;color:#4f46e5}
 .card-badge.folder{background:#fef3c7;color:#b45309}
+.card-icon{font-size:22px;flex-shrink:0;line-height:1}
 .card-arrow{color:#d1d5db;font-size:14px;flex-shrink:0;transition:color .15s}
 .section-card:hover .card-arrow{color:#6366f1}
 .footer{text-align:center;padding:2rem;color:#9ca3af;font-size:12px;margin-top:1rem}
@@ -1175,6 +1269,7 @@ body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f8f9fb;color:#
 .card-badge.lang-he{background:#ecfdf5;color:#059669}
 .card-badge.lang-en{background:#eef2ff;color:#4f46e5}
 .card-badge.folder{background:#fef3c7;color:#b45309}
+.card-icon{font-size:22px;flex-shrink:0;line-height:1}
 .card-arrow{color:#d1d5db;font-size:14px;flex-shrink:0;transition:color .15s}
 .section-card:hover .card-arrow{color:#6366f1}
 .footer{text-align:center;padding:2rem;color:#9ca3af;font-size:12px;margin-top:1rem}
@@ -1448,16 +1543,39 @@ def md_to_html(md: str) -> tuple:
 
 # ─── Extract metadata ─────────────────────────────────────────────────────────
 
-def extract_metadata(md: str) -> tuple:
-    """Extract title and subtitle from markdown.
+def parse_frontmatter(md: str) -> tuple:
+    """Parse optional YAML frontmatter from markdown.
 
-    Title: first # heading.
-    Subtitle: first > blockquote, or next heading, or first paragraph.
-    Skips table rows (lines starting with |) to avoid picking up table content as subtitle.
+    Returns (frontmatter_dict, body_without_frontmatter).
+    Supported fields: title, description, icon, accent, order.
     """
-    title = ''
-    subtitle = ''
-    for line in md.split('\n'):
+    fm = {}
+    body = md
+    if md.startswith('---'):
+        end = md.find('\n---', 3)
+        if end != -1:
+            yaml_block = md[3:end].strip()
+            body = md[end + 4:].lstrip('\n')
+            for line in yaml_block.split('\n'):
+                m = re.match(r'^(\w+)\s*:\s*(.+)$', line)
+                if m:
+                    fm[m.group(1).strip()] = m.group(2).strip().strip('"').strip("'")
+    return fm, body
+
+
+def extract_metadata(md: str) -> tuple:
+    """Extract title, subtitle, and frontmatter from markdown.
+
+    Returns (title, subtitle, frontmatter_dict).
+    Frontmatter fields (title, description) override auto-extraction.
+    """
+    fm, body = parse_frontmatter(md)
+
+    title = fm.get('title', '')
+    subtitle = fm.get('description', '')
+
+    # Auto-extract from body if not in frontmatter
+    for line in body.split('\n'):
         line = line.strip()
         if not title:
             m = re.match(r'^#\s+(.+)', line)
@@ -1482,7 +1600,7 @@ def extract_metadata(md: str) -> tuple:
             if line and not re.match(r'^(-{3,}|\*{3,}|_{3,})$', line):
                 subtitle = line
                 break
-    return title or 'Untitled', subtitle
+    return title or 'Untitled', subtitle, fm
 
 
 # ─── Build TOC ────────────────────────────────────────────────────────────────
@@ -1530,8 +1648,9 @@ def convert_file(md_path: str) -> str:
     md_path = Path(md_path).resolve()
     md_text = md_path.read_text(encoding='utf-8')
 
-    title, subtitle = extract_metadata(md_text)
-    content_html, headings = md_to_html(md_text)
+    title, subtitle, fm = extract_metadata(md_text)
+    _, body_without_fm = parse_frontmatter(md_text)
+    content_html, headings = md_to_html(body_without_fm)
     toc_html = build_toc(headings)
     gen_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
@@ -1608,6 +1727,11 @@ def generate_index(folder: str) -> str:
                       if d.is_dir() and not d.name.startswith('.')
                       and list(d.glob('*.md'))])
 
+    # Load config early for per-file/folder overrides
+    idx_config = load_config(str(folder), title=folder_name)
+    doc_overrides = idx_config.get('documents', {})   # {"filename.md": {title, description, icon, accent}}
+    folder_overrides = idx_config.get('folders', {})   # {"foldername": {title, description, icon, accent}}
+
     cards_html = ''
     accent_colors = ['blue', 'green', 'purple']
     hebrew_count = 0
@@ -1616,23 +1740,29 @@ def generate_index(folder: str) -> str:
     if md_files:
         for idx, md in enumerate(md_files):
             text = md.read_text(encoding='utf-8')
-            t, s = extract_metadata(text)
+            t, s, fm = extract_metadata(text)
             html_name = md.stem + '.html'
             is_heb = is_hebrew(text)
             if is_heb:
                 hebrew_count += 1
             total_count += 1
+            # Merge overrides: frontmatter < config documents override
+            overrides = doc_overrides.get(md.name, {})
+            card_title = overrides.get('title', fm.get('title', '')) or t
+            card_desc = overrides.get('description', fm.get('description', '')) or s
+            card_icon = overrides.get('icon', fm.get('icon', ''))
+            card_accent = overrides.get('accent', fm.get('accent', '')) or accent_colors[idx % len(accent_colors)]
             lang_cls = 'he' if is_heb else 'en'
             lang_label = 'Hebrew' if is_heb else 'English'
-            accent = accent_colors[idx % len(accent_colors)]
-            icon = '&#128214;' if is_heb else '&#128196;'
-            desc_html = f'<p>{html.escape(s)}</p>' if s else '<p></p>'
+            desc_html = f'<p>{html.escape(card_desc)}</p>' if card_desc else '<p></p>'
+            icon_html = f'<span class="card-icon">{card_icon}</span>' if card_icon else ''
             cards_html += (
                 f'<a class="section-card" href="{html_name}">'
-                f'<div class="card-stripe {accent}"></div>'
+                f'<div class="card-stripe {card_accent}"></div>'
                 f'<div class="card-body">'
+                f'{icon_html}'
                 f'<div class="card-info">'
-                f'<h2>{html.escape(t)}</h2>'
+                f'<h2>{html.escape(card_title)}</h2>'
                 f'{desc_html}'
                 f'</div>'
                 f'<div class="card-badges">'
@@ -1654,17 +1784,23 @@ def generate_index(folder: str) -> str:
             if is_heb:
                 hebrew_count += 1
             total_count += 1
+            # Merge overrides from config
+            f_overrides = folder_overrides.get(d.name, {})
+            card_title = f_overrides.get('title', d.name)
+            card_desc = f_overrides.get('description', f'{md_count} document{"s" if md_count != 1 else ""}')
+            card_icon = f_overrides.get('icon', '')
+            card_accent = f_overrides.get('accent', accent_colors[(idx + len(md_files)) % len(accent_colors)])
             lang_cls = 'he' if is_heb else 'en'
             lang_label = 'Hebrew' if is_heb else 'English'
-            accent = accent_colors[(idx + len(md_files)) % len(accent_colors)]
-            icon = '&#128194;'
+            icon_html = f'<span class="card-icon">{card_icon}</span>' if card_icon else ''
             cards_html += (
                 f'<a class="section-card" href="{d.name}/index.html">'
-                f'<div class="card-stripe {accent}"></div>'
+                f'<div class="card-stripe {card_accent}"></div>'
                 f'<div class="card-body">'
+                f'{icon_html}'
                 f'<div class="card-info">'
-                f'<h2>{d.name}</h2>'
-                f'<p>{md_count} document{"s" if md_count != 1 else ""}</p>'
+                f'<h2>{html.escape(card_title)}</h2>'
+                f'<p>{html.escape(card_desc)}</p>'
                 f'</div>'
                 f'<div class="card-badges">'
                 f'<span class="card-badge folder">{md_count} docs</span>'
@@ -1673,7 +1809,7 @@ def generate_index(folder: str) -> str:
                 f'</div></a>\n'
             )
 
-    config = load_config(str(folder), title=folder_name)
+    config = idx_config
     org_name = config.get('orgName', '')
     # Subtitle fallback chain: config.subtitle → orgName → empty
     subtitle_text = config.get('subtitle', '')
