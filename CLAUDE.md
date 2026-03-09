@@ -9,6 +9,7 @@ This is **moonsite-claude-extensions** — a collection of Claude Code extension
 ### Current extensions
 
 - **jira-autopilot** (`plugins/jira-autopilot/`) — Autonomous Jira work tracking, issue creation, and time logging.
+- **moonsite-skills** (`plugins/moonsite-skills/`) — Utility skills: version bumping (`/bump-release`) and spec generation (`/moonsite-spec`).
 
 ## jira-autopilot Architecture
 
@@ -62,6 +63,15 @@ SessionEnd → log time + post work summary to each Jira issue
 - **MCP-first, REST-fallback.** Commands try Atlassian MCP tools first, fall back to `jira-rest.sh` curl-based API calls.
 - **Multi-issue tracking.** Session state supports multiple active issues with time tracking on each.
 - **Automatic work documentation.** PostToolUse hook logs activities; Stop hook creates work chunks; SessionEnd posts summaries to Jira.
+
+## Version bumps
+
+After every version bump, **always** show a summary table with file paths, old versions, and new versions. Example:
+
+| File | Old | New |
+|------|-----|-----|
+| `.claude-plugin/marketplace.json` (top-level) | 1.2.0 | **1.2.1** |
+| `plugins/md-html-docs/skills/md-html-docs/SKILL.md` | 2.3.0 | **2.3.1** |
 
 ## Working on this code
 
