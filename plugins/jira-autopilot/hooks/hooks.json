@@ -1,30 +1,71 @@
 {
-  "hooks": [
-    {
-      "event": "SessionStart",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start-check.sh"
-    },
-    {
-      "event": "PostToolUse",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/post-tool-use.sh",
-      "async": true
-    },
-    {
-      "event": "PreToolUse",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre-tool-use.sh"
-    },
-    {
-      "event": "Stop",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/stop.sh"
-    },
-    {
-      "event": "SessionEnd",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-end.sh"
-    },
-    {
-      "event": "UserPromptSubmit",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/user-prompt-submit.sh",
-      "timeout": 10000
-    }
-  ]
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start-check.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/post-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/stop.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-end.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/user-prompt-submit.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
 }
