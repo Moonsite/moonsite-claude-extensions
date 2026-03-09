@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.3.5
+version: 2.3.6
 ---
 
 # md-html-docs
@@ -47,6 +47,69 @@ Use `/md-html-docs-convert` with a path:
 /md-html-docs status    # check current state
 ```
 
+## Document Metadata
+
+### YAML Frontmatter (per-file)
+
+Add frontmatter to any `.md` file to control its title, description, icon, and accent color in index pages:
+
+```markdown
+---
+title: My Document Title
+description: Brief description shown on index cards
+icon: 📊
+accent: purple
+---
+
+# Actual content starts here...
+```
+
+Supported fields: `title`, `description`, `icon` (emoji), `accent` (`blue`, `green`, `purple`, `orange`).
+
+Frontmatter is stripped from the rendered HTML — it only affects metadata.
+
+### Project Config (`.claude/md-html-docs.json`)
+
+Create this file in the project's `.claude/` directory for project-wide settings:
+
+```json
+{
+  "projectName": "My Project",
+  "orgName": "Acme Corp",
+  "colorScheme": "blue",
+  "documents": {
+    "intro.md": { "title": "Getting Started", "icon": "🚀", "accent": "green" },
+    "api.md": { "title": "API Reference", "description": "REST endpoints", "icon": "📡" }
+  },
+  "folders": {
+    "guides": { "title": "User Guides", "icon": "📖", "accent": "purple" },
+    "specs": { "title": "Technical Specs", "icon": "📐" }
+  }
+}
+```
+
+**Config fields:**
+- `projectName` — shown in page header
+- `orgName` — shown below project name
+- `logoText` — 2-char text in header circle (auto-derived from projectName)
+- `colorScheme` — preset: `blue`, `green`, `purple`, `orange`
+- `accentColor`, `headerFrom`, `headerTo` — custom hex colors (override preset)
+- `footerText` — custom footer text
+- `documents` — per-file overrides keyed by filename (e.g. `"intro.md": {...}`)
+- `folders` — per-folder overrides keyed by folder name (e.g. `"guides": {...}`)
+
+**Priority chain:** config `documents`/`folders` override > frontmatter > auto-extracted from headings.
+
+### Links Between Documents
+
+Local `.md` links are automatically rewritten to `.html` during conversion:
+
+```markdown
+See [the API docs](api.md) or [setup guide](guides/setup.md#configuration)
+```
+
+Becomes: `<a href="api.html">` and `<a href="guides/setup.html#configuration">`.
+
 ## Key Rules
 
 - **Never edit `.html` files directly** — always edit `.md` and let the converter regenerate
@@ -54,3 +117,4 @@ Use `/md-html-docs-convert` with a path:
 - **Images**: reference with relative paths in markdown, e.g. `![alt](images/screenshot.png)`
 - **Templates are auto-selected** — Hebrew content gets RTL, everything else gets LTR
 - **Diagram blocks** (`mermaid`, `pintora`, `dot`, `graphviz`, `nomnoml`, `d2`) render as interactive SVGs via client-side libraries (d2 uses Kroki.io API)
+- **Review notes**: heading 📝 buttons and text-selection notes are stored in localStorage per page; export to Markdown groups notes by section
