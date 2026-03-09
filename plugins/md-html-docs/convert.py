@@ -804,15 +804,18 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
 /* ── Header ── */
 .site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;letter-spacing:.5px;flex-shrink:0}
+.logo-circle{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .site-header .header-text h1{font-size:1rem;font-weight:600;margin:0;line-height:1.3}
 .site-header .header-text .org{font-size:.75rem;opacity:.8;margin:0}
-.doc-title{font-size:.85rem;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.doc-title{font-size:1rem;font-weight:500;opacity:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45vw;transition:opacity .25s;pointer-events:none}
+.doc-title.visible{opacity:.9;pointer-events:auto}
 .doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
 .header-right{margin-left:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
 .header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
 .header-index:hover{background:rgba(255,255,255,.25);color:#fff}
 .org:empty{display:none}
+.header-home{display:flex;align-items:center;gap:1rem;text-decoration:none;color:inherit;transition:opacity .15s}
+.header-home:hover{opacity:.85}
 
 /* ── Layout ── */
 .page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
@@ -906,11 +909,13 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 </head>
 <body>
 <header class="site-header">
-  <div class="logo-circle">{{LOGO_TEXT}}</div>
-  <div class="header-text">
-    <h1>{{PROJECT_NAME}}</h1>
-    <div class="org">{{ORG_NAME}}</div>
-  </div>
+  <a href="index.html" class="header-home">
+    <div class="logo-circle">{{LOGO_TEXT}}</div>
+    <div class="header-text">
+      <h1>{{PROJECT_NAME}}</h1>
+      <div class="org">{{ORG_NAME}}</div>
+    </div>
+  </a>
   <span class="doc-title">{{TITLE}}</span>
   <div class="header-right">
     <a href="index.html" class="header-index">&#128196; Index</a>
@@ -955,6 +960,15 @@ function setLayout(mode){
   try{localStorage.setItem('doc-layout',mode)}catch(e){}
 }
 (function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
+(function(){
+  var dt=document.querySelector('.doc-title');
+  var h1=document.querySelector('.doc-header h1');
+  if(!dt||!h1)return;
+  var obs=new IntersectionObserver(function(entries){
+    dt.classList.toggle('visible',!entries[0].isIntersecting);
+  },{threshold:0,rootMargin:'-56px 0px 0px 0px'});
+  obs.observe(h1);
+})();
 </script>
 <script>
 (function(){
@@ -1011,15 +1025,18 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 
 /* ── Header ── */
 .site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;letter-spacing:.5px;flex-shrink:0}
+.logo-circle{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .site-header .header-text h1{font-size:1rem;font-weight:600;margin:0;line-height:1.3}
 .site-header .header-text .org{font-size:.75rem;opacity:.8;margin:0}
-.doc-title{font-size:.85rem;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.doc-title{font-size:1rem;font-weight:500;opacity:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45vw;transition:opacity .25s;pointer-events:none}
+.doc-title.visible{opacity:.9;pointer-events:auto}
 .doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
-.header-right{margin-left:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+.header-right{margin-right:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
 .header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
 .header-index:hover{background:rgba(255,255,255,.25);color:#fff}
 .org:empty{display:none}
+.header-home{display:flex;align-items:center;gap:1rem;text-decoration:none;color:inherit;transition:opacity .15s}
+.header-home:hover{opacity:.85}
 
 /* ── Layout ── */
 .page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
@@ -1116,11 +1133,13 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 </head>
 <body>
 <header class="site-header">
-  <div class="logo-circle">{{LOGO_TEXT}}</div>
-  <div class="header-text">
-    <h1>{{PROJECT_NAME}}</h1>
-    <div class="org">{{ORG_NAME}}</div>
-  </div>
+  <a href="index.html" class="header-home">
+    <div class="logo-circle">{{LOGO_TEXT}}</div>
+    <div class="header-text">
+      <h1>{{PROJECT_NAME}}</h1>
+      <div class="org">{{ORG_NAME}}</div>
+    </div>
+  </a>
   <span class="doc-title">{{TITLE}}</span>
   <div class="header-right">
     <a href="index.html" class="header-index">&#128196; &#1488;&#1497;&#1504;&#1491;&#1511;&#1505;</a>
@@ -1165,6 +1184,15 @@ function setLayout(mode){
   try{localStorage.setItem('doc-layout',mode)}catch(e){}
 }
 (function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
+(function(){
+  var dt=document.querySelector('.doc-title');
+  var h1=document.querySelector('.doc-header h1');
+  if(!dt||!h1)return;
+  var obs=new IntersectionObserver(function(entries){
+    dt.classList.toggle('visible',!entries[0].isIntersecting);
+  },{threshold:0,rootMargin:'-56px 0px 0px 0px'});
+  obs.observe(h1);
+})();
 </script>
 <script>
 (function(){
