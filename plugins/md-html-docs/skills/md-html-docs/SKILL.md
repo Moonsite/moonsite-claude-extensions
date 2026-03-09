@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.3.7
+version: 2.3.8
 ---
 
 # md-html-docs
@@ -70,33 +70,51 @@ Frontmatter is stripped from the rendered HTML — it only affects metadata.
 
 ### Project Config (`.claude/md-html-docs.json`)
 
-Create this file in the project's `.claude/` directory for project-wide settings:
+**IMPORTANT — set this up before generating HTML.** Create `.claude/md-html-docs.json` in the project root:
 
 ```json
 {
-  "projectName": "My Project",
-  "orgName": "Acme Corp",
+  "projectName": "Brosh",
+  "orgName": "Moonsite",
+  "logoText": "BR",
   "colorScheme": "blue",
+  "footerText": "Brosh Documentation",
   "documents": {
-    "intro.md": { "title": "Getting Started", "icon": "🚀", "accent": "green" },
-    "api.md": { "title": "API Reference", "description": "REST endpoints", "icon": "📡" }
+    "intro.md": { "title": "Getting Started", "icon": "🚀", "accent": "green" }
   },
   "folders": {
-    "guides": { "title": "User Guides", "icon": "📖", "accent": "purple" },
     "specs": { "title": "Technical Specs", "icon": "📐" }
   }
 }
 ```
 
-**Config fields:**
-- `projectName` — shown in page header
-- `orgName` — shown below project name
-- `logoText` — 2-char text in header circle (auto-derived from projectName)
-- `colorScheme` — preset: `blue`, `green`, `purple`, `orange`
+#### Header Layout
+
+The sticky header displays these config values:
+
+```
+[logo circle] [project name]  [doc title]  ...  [Index btn] [Layout buttons]
+              [org name]
+```
+
+| Config Field | Where It Shows | Example | Notes |
+|---|---|---|---|
+| `projectName` | Header — main label (bold) | `"Brosh"` | Product/project name |
+| `orgName` | Header — subtitle below project name | `"Moonsite"` | Company/team. Leave empty `""` to hide |
+| `logoText` | Header — 2-char circle icon | `"BR"` | Auto-derived from first 2 chars of `projectName` if omitted |
+
+**If `projectName` and `orgName` show the same value**, one of them is wrong. `projectName` = the product/project, `orgName` = the company/team that owns it. Set `orgName` to `""` to hide it entirely.
+
+#### All Config Fields
+
+- `projectName` — **required** — product/project name shown in header
+- `orgName` — company/team name shown below project name (set `""` to hide)
+- `logoText` — 2-char text in header circle (auto-derived from `projectName` if omitted)
+- `colorScheme` — preset theme: `blue`, `green`, `purple`, `orange`
 - `accentColor`, `headerFrom`, `headerTo` — custom hex colors (override preset)
 - `footerText` — custom footer text
-- `documents` — per-file overrides keyed by filename (e.g. `"intro.md": {...}`)
-- `folders` — per-folder overrides keyed by folder name (e.g. `"guides": {...}`)
+- `documents` — per-file overrides keyed by filename: `{"file.md": {title, description, icon, accent}}`
+- `folders` — per-folder overrides keyed by folder name: `{"guides": {title, description, icon, accent}}`
 
 **Priority chain:** config `documents`/`folders` override > frontmatter > auto-extracted from headings.
 
