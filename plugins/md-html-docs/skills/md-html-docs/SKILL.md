@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.3.9
+version: 2.3.10
 ---
 
 # md-html-docs
@@ -127,6 +127,46 @@ See [the API docs](api.md) or [setup guide](guides/setup.md#configuration)
 ```
 
 Becomes: `<a href="api.html">` and `<a href="guides/setup.html#configuration">`.
+
+### Enriching Index Pages (LLM-Powered)
+
+After running `--all`, index pages show raw folder names and generic descriptions. **Always enrich indexes using LLM intelligence:**
+
+1. **Analyze content**: Read the first heading and opening lines of `.md` files in each folder to understand the section's purpose
+2. **Create/update config**: Write `.claude/md-html-docs.json` in the project root with meaningful `folders` and `documents` overrides:
+
+```json
+{
+  "projectName": "My Project",
+  "orgName": "Company Name",
+  "logoText": "MP",
+  "colorScheme": "blue",
+  "footerText": "My Project Documentation",
+  "folders": {
+    "guides": { "title": "User Guides", "description": "Step-by-step guides for common workflows", "icon": "📖" },
+    "api": { "title": "API Reference", "description": "Complete REST API documentation with examples", "icon": "🔌" }
+  },
+  "documents": {
+    "setup.md": { "title": "Getting Started", "description": "Installation and initial configuration", "icon": "🚀" }
+  }
+}
+```
+
+3. **Add YAML frontmatter** to `.md` files that need custom titles/descriptions beyond what auto-extraction provides:
+
+```markdown
+---
+title: Developer Guide
+description: Hands-on guide for integrating AI tools into daily development workflow
+icon: 💻
+---
+```
+
+4. **Regenerate**: run the converter with `--all` to rebuild all indexes with the enriched metadata
+
+The converter discovers all folders recursively — intermediate folders with only subfolders (no direct `.md` files) also get proper index pages with navigation cards.
+
+**When to enrich**: Always run this workflow after `--all` on a new project or when new folders are added. The LLM should generate titles that are human-friendly (not raw folder names), descriptions that summarize the section's content, and appropriate icons.
 
 ## Key Rules
 
