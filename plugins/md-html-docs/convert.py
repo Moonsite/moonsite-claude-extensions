@@ -775,13 +775,11 @@ def load_config(start_dir, title=''):
         if parent == d:
             break
         d = parent
-    # No config found — derive smart defaults from document title
-    if title:
-        defaults['projectName'] = title
-        defaults['logoText'] = title[:2]
-    else:
-        defaults['projectName'] = 'Documentation'
-        defaults['logoText'] = 'Docs'
+    # No config found — use folder name as project name (not document title)
+    start = Path(start_dir).resolve()
+    folder_name = start.name or 'Docs'
+    defaults['projectName'] = folder_name
+    defaults['logoText'] = folder_name[:2]
     return defaults
 
 
@@ -867,6 +865,8 @@ a{color:var(--accent)}
 ul,ol{margin:0 0 1rem 1.5rem}
 li{margin-bottom:.35rem}
 li input[type="checkbox"]{margin-right:.4rem}
+ul.checklist{list-style:none;padding-left:0}
+ul.checklist li{display:flex;align-items:baseline;gap:.4rem;padding:.25rem 0}
 blockquote{border-left:3px solid var(--accent);padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:0 var(--radius) var(--radius) 0}
 
 /* ── Code ── */
@@ -1088,6 +1088,8 @@ a{color:var(--accent)}
 ul,ol{margin:0 0 1rem 0;padding-right:1.5rem}
 li{margin-bottom:.35rem}
 li input[type="checkbox"]{margin-left:.4rem}
+ul.checklist{list-style:none;padding-right:0}
+ul.checklist li{display:flex;align-items:baseline;gap:.4rem;padding:.25rem 0}
 blockquote{border-right:3px solid var(--accent);border-left:none;padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:var(--radius) 0 0 var(--radius)}
 
 /* ── Warning boxes ── */
@@ -1391,6 +1393,7 @@ def md_to_html(md: str) -> tuple:
     lines = md.split('\n')
     out = []
     headings = []
+    first_h1_skipped = False
     in_code_block = False
     code_lang = ''
     code_lines = []
@@ -1550,6 +1553,11 @@ def md_to_html(md: str) -> tuple:
             text = m.group(2).strip()
             slug = slugify(text)
             processed = inline(text)
+            # Skip first h1 — it's rendered in the doc-header template
+            if level == 1 and not first_h1_skipped:
+                first_h1_skipped = True
+                i += 1
+                continue
             if level >= 2:
                 headings.append((level, text, slug))
             out.append(f'<h{level} id="{slug}">{processed}</h{level}>')
@@ -1570,7 +1578,10 @@ def md_to_html(md: str) -> tuple:
             flush_blockquote()
             if not in_list or list_type != 'ul':
                 flush_list()
-                out.append('<ul>')
+                # Detect checkbox list: peek if first item starts with [ ] or [x]
+                is_checklist = bool(re.match(r'^\[[ xX]\]', m.group(2)))
+                cls = ' class="checklist"' if is_checklist else ''
+                out.append(f'<ul{cls}>')
                 in_list = True
                 list_type = 'ul'
             out.append(f'<li>{inline(m.group(2))}</li>')
@@ -1629,6 +1640,19 @@ def parse_frontmatter(md: str) -> tuple:
     return fm, body
 
 
+def strip_md(text: str) -> str:
+    """Strip markdown formatting from text (bold, italic, links, images, code)."""
+    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)  # images
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)   # links
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)           # bold
+    text = re.sub(r'__(.+?)__', r'\1', text)                # bold alt
+    text = re.sub(r'\*(.+?)\*', r'\1', text)                # italic
+    text = re.sub(r'_(.+?)_', r'\1', text)                  # italic alt
+    text = re.sub(r'`(.+?)`', r'\1', text)                  # inline code
+    text = re.sub(r'^#+\s+', '', text)                       # heading markers
+    return text.strip()
+
+
 def extract_metadata(md: str) -> tuple:
     """Extract title, subtitle, and frontmatter from markdown.
 
@@ -1666,7 +1690,7 @@ def extract_metadata(md: str) -> tuple:
             if line and not re.match(r'^(-{3,}|\*{3,}|_{3,})$', line):
                 subtitle = line
                 break
-    return title or 'Untitled', subtitle, fm
+    return strip_md(title) or 'Untitled', strip_md(subtitle), fm
 
 
 # ─── Build TOC ────────────────────────────────────────────────────────────────
@@ -1789,10 +1813,10 @@ def generate_index(folder: str) -> str:
 
     # Collect .md files
     md_files = sorted(folder.glob('*.md'))
-    # Collect subdirectories that contain .md files
+    # Collect subdirectories that contain .md files (directly or in descendants)
     subdirs = sorted([d for d in folder.iterdir()
                       if d.is_dir() and not d.name.startswith('.')
-                      and list(d.glob('*.md'))])
+                      and list(d.rglob('*.md'))])
 
     # Load config early for per-file/folder overrides
     idx_config = load_config(str(folder), title=folder_name)
@@ -1841,9 +1865,9 @@ def generate_index(folder: str) -> str:
 
     if subdirs:
         for idx, d in enumerate(subdirs):
-            md_count = len(list(d.glob('*.md')))
+            md_count = len(list(d.rglob('*.md')))
             # Check language of first .md in subfolder
-            first_md = next(d.glob('*.md'), None)
+            first_md = next(d.rglob('*.md'), None)
             is_heb = False
             if first_md:
                 sample = first_md.read_text(encoding='utf-8')[:500]
@@ -1894,7 +1918,7 @@ def generate_index(folder: str) -> str:
 
     final = (template
              .replace('{{TITLE}}', html.escape(folder_name))
-             .replace('{{SUBTITLE}}', f'{len(md_files)} documents')
+             .replace('{{SUBTITLE}}', f'{total_count} item{"s" if total_count != 1 else ""}')
              .replace('{{CONTENT}}', cards_html)
              .replace('{{GENERATION_DATE}}', gen_date)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
@@ -1928,17 +1952,21 @@ def convert_all(root: str) -> None:
     root = Path(root).resolve()
     # Convert files
     convert_folder(str(root), recursive=True)
-    # Generate indexes bottom-up
-    dirs_with_md = set()
+    # Generate indexes bottom-up — include intermediate dirs (no direct .md but have sub-dirs with .md)
+    dirs_needing_index = set()
     for md in root.rglob('*.md'):
-        dirs_with_md.add(md.parent)
+        # Add the directory containing the .md file
+        dirs_needing_index.add(md.parent)
+        # Add all ancestor directories up to (and including) root
+        parent = md.parent.parent
+        while parent >= root:
+            dirs_needing_index.add(parent)
+            if parent == root:
+                break
+            parent = parent.parent
     # Sort by depth descending so children are indexed before parents
-    for d in sorted(dirs_with_md, key=lambda p: len(p.parts), reverse=True):
+    for d in sorted(dirs_needing_index, key=lambda p: len(p.parts), reverse=True):
         idx = generate_index(str(d))
-        print(f'  index: {idx}')
-    # Root index if it has subdirs
-    if dirs_with_md:
-        idx = generate_index(str(root))
         print(f'  index: {idx}')
 
 
