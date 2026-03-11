@@ -831,9 +831,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar details summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.25rem;padding:.25rem .5rem;border-radius:0 4px 4px 0;transition:background .15s}
 .sidebar details summary:hover{background:var(--accent-light)}
 .sidebar details summary::-webkit-details-marker{display:none}
-.sidebar details summary::after{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
-.sidebar details[open] summary::after{transform:rotate(90deg)}
-.sidebar details summary::before{display:none}
+.sidebar details summary::before{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
+.sidebar details[open] summary::before{transform:rotate(90deg)}
+.sidebar details summary::after{display:none}
 .sidebar details summary a{display:block;flex:1;padding:0;margin:0;border:none;border-radius:0}
 .sidebar details summary a:hover{background:none}
 .sidebar details .h3-link{padding-left:1.5rem}
