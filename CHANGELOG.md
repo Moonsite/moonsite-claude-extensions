@@ -6,6 +6,11 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.2.14] — 2026-03-11
+
+### md-html-docs 2.3.13
+- Fix LTR sidebar arrow position: move from right side (::after) to left side (::before)
+
 ## [1.2.13] — 2026-03-11
 
 ### md-html-docs 2.3.12
