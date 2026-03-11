@@ -6,6 +6,13 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.2.13] — 2026-03-11
+
+### md-html-docs 2.3.12
+- Redesign sidebar TOC: CSS triangle arrows, flexbox alignment, tighter spacing
+- Strip "Table of Contents" / "תוכן עניינים" headings from body and TOC
+- Consistent h2/h3 indentation in both LTR and RTL templates
+
 ## [1.2.12] — 2026-03-11
 
 ### md-html-docs 2.3.11

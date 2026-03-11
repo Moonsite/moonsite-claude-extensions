@@ -819,20 +819,24 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
 
 /* ── Sidebar ── */
-.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:1px solid var(--border)}
-.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
-.sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
-.sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-left:2px solid transparent;margin-bottom:.15rem;border-radius:0 4px 4px 0;transition:all .15s}
+.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1rem .75rem;background:var(--surface);border-right:1px solid var(--border)}
+.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:1rem}
+.sidebar-card h3{font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.5rem;font-weight:600;padding:0 .5rem}
+.sidebar a{display:block;padding:.25rem .5rem;color:var(--text);text-decoration:none;font-size:.8rem;line-height:1.4;border-left:2px solid transparent;margin-bottom:1px;border-radius:0 4px 4px 0;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
 .sidebar a.toc-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600}
-.sidebar a.h3-link{padding-left:1.25rem;font-size:.8rem;color:var(--muted)}
+.sidebar a.h3-link{padding-left:1.5rem;font-size:.75rem;color:var(--muted)}
 /* ── Collapsible TOC ── */
-.sidebar details{margin-bottom:.15rem}
-.sidebar details summary{list-style:none;cursor:pointer}
+.sidebar details{margin-bottom:1px}
+.sidebar details summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.25rem;padding:.25rem .5rem;border-radius:0 4px 4px 0;transition:background .15s}
+.sidebar details summary:hover{background:var(--accent-light)}
 .sidebar details summary::-webkit-details-marker{display:none}
-.sidebar details summary::before{content:'▸';display:inline-block;width:1em;font-size:.7em;transition:transform .15s;vertical-align:middle}
-.sidebar details[open] summary::before{transform:rotate(90deg)}
-.sidebar details summary a{display:inline}
+.sidebar details summary::after{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
+.sidebar details[open] summary::after{transform:rotate(90deg)}
+.sidebar details summary::before{display:none}
+.sidebar details summary a{display:block;flex:1;padding:0;margin:0;border:none;border-radius:0}
+.sidebar details summary a:hover{background:none}
+.sidebar details .h3-link{padding-left:1.5rem}
 /* ── Layout switcher ── */
 .layout-toolbar{display:flex;gap:.3rem;align-items:center}
 .layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
@@ -1042,20 +1046,24 @@ body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var
 .page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
 
 /* ── Sidebar ── */
-.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1.5rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
-.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
-.sidebar-card h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.75rem;font-weight:600}
-.sidebar a{display:block;padding:.3rem .5rem;color:var(--text);text-decoration:none;font-size:.85rem;border-right:2px solid transparent;border-left:none;margin-bottom:.15rem;border-radius:4px 0 0 4px;padding-right:.75rem;transition:all .15s}
+.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1rem .75rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
+.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:1rem}
+.sidebar-card h3{font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.5rem;font-weight:600;padding:0 .5rem}
+.sidebar a{display:block;padding:.25rem .5rem;color:var(--text);text-decoration:none;font-size:.8rem;line-height:1.4;border-right:2px solid transparent;border-left:none;margin-bottom:1px;border-radius:4px 0 0 4px;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
 .sidebar a.toc-active{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light);font-weight:600}
-.sidebar a.h3-link{padding-right:1.25rem;font-size:.8rem;color:var(--muted)}
+.sidebar a.h3-link{padding-right:1.5rem;font-size:.75rem;color:var(--muted)}
 /* ── Collapsible TOC ── */
-.sidebar details{margin-bottom:.15rem}
-.sidebar details summary{list-style:none;cursor:pointer}
+.sidebar details{margin-bottom:1px}
+.sidebar details summary{list-style:none;cursor:pointer;display:flex;align-items:center;flex-direction:row-reverse;gap:.25rem;padding:.25rem .5rem;border-radius:4px 0 0 4px;transition:background .15s}
+.sidebar details summary:hover{background:var(--accent-light)}
 .sidebar details summary::-webkit-details-marker{display:none}
-.sidebar details summary::before{content:'◂';display:inline-block;width:1em;font-size:.7em;transition:transform .15s;vertical-align:middle}
-.sidebar details[open] summary::before{transform:rotate(-90deg)}
-.sidebar details summary a{display:inline}
+.sidebar details summary::after{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
+.sidebar details[open] summary::after{transform:rotate(-90deg)}
+.sidebar details summary::before{display:none}
+.sidebar details summary a{display:block;flex:1;padding:0;margin:0;border:none;border-radius:0}
+.sidebar details summary a:hover{background:none}
+.sidebar details .h3-link{padding-right:1.5rem}
 /* ── Layout switcher ── */
 .layout-toolbar{display:flex;gap:.3rem;align-items:center}
 .layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
@@ -1556,6 +1564,11 @@ def md_to_html(md: str) -> tuple:
             # Skip first h1 — it's rendered in the doc-header template
             if level == 1 and not first_h1_skipped:
                 first_h1_skipped = True
+                i += 1
+                continue
+            # Skip "Table of Contents" headings — sidebar handles TOC
+            toc_names = {'table of contents', 'תוכן עניינים', 'toc'}
+            if text.strip().lower() in toc_names:
                 i += 1
                 continue
             if level >= 2:
