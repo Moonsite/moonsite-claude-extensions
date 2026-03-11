@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.2.11",
+    "version": "1.2.12",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -34,7 +34,7 @@
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
       "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
-      "version": "2.3.10",
+      "version": "2.3.11",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -55,7 +55,7 @@
       "name": "moonsite-skills",
       "source": "./plugins/moonsite-skills",
       "description": "Moonsite utility skills — version bumping, spec generation",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "Boris Sigalov"
       },

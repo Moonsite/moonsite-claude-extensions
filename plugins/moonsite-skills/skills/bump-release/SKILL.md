@@ -1,7 +1,7 @@
 ---
 name: bump-release
 description: "Bump version across all project files, commit, push, and create PR. Use when the user says 'bump version', 'release', 'bump-release', 'cut a release', 'version bump', or similar."
-version: 1.0.1
+version: 1.0.2
 ---
 
 # Bump Release
@@ -64,14 +64,30 @@ Update each detected file with the new version using the Edit tool. Handle each 
 - **Gradle files**: Update `version = "..."` or `version '...'`
 - **Python setup files**: Update `version=` argument
 
-### Step 5: Commit and Push
+### Step 5: Update CHANGELOG.md
+
+If `CHANGELOG.md` exists in the project root, prepend a new release entry **after** the `---` separator (below the header). Use today's date and the new top-level version:
+
+```markdown
+## [X.Y.Z] — YYYY-MM-DD
+
+### plugin-name X.Y.Z
+- Brief summary of each change (one bullet per change)
+- Focus on user-facing changes, not internal refactors
+```
+
+To determine what changed: check `git log` since the last version tag or release commit, and read PR descriptions. Group changes by plugin. Keep descriptions concise (one line each).
+
+If `CHANGELOG.md` does not exist, skip this step.
+
+### Step 6: Commit and Push
 
 1. Run `git status` and `git diff` to review changes
-2. Stage only the version-bumped files (by name, not `git add -A`)
+2. Stage only the version-bumped files **and** `CHANGELOG.md` (by name, not `git add -A`)
 3. Commit with message: `Bump version to X.Y.Z`
 4. Push to the current remote branch
 
-### Step 6: Create PR and Merge (if applicable)
+### Step 7: Create PR and Merge (if applicable)
 
 Check the current branch. If it's NOT the main/default branch:
 1. Use `gh pr create` to create a pull request
