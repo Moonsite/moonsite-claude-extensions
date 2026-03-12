@@ -40,7 +40,7 @@ function colorize(text, color) {
 
 // ─── CLI args ────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const args = { with: null, topic: null, moderator: null, style: null, duration: null, file: null, length: 'normal' };
+  const args = { with: null, topic: null, moderator: null, style: null, duration: null, file: null };
   const positional = [];
 
   for (let i = 2; i < argv.length; i++) {
@@ -52,7 +52,6 @@ function parseArgs(argv) {
     else if (argv[i] === '--style') args.style = argv[++i];
     else if (argv[i] === '--duration') args.duration = argv[++i];
     else if (argv[i] === '--file') args.file = argv[++i];
-    else if (argv[i] === '--length') args.length = argv[++i];
     else positional.push(argv[i]);
   }
 
@@ -173,19 +172,8 @@ if (args.style) {
   moderatorStyle = STYLE_INSTRUCTIONS[args.style] || `You are the MODERATOR of this discussion. ${args.style}`;
 }
 
-// ─── Response length control ─────────────────────────────────────────────────
-const LENGTH_PRESETS = {
-  brief:    { instruction: 'Keep responses to 1-3 sentences. Be extremely concise — a single word or short phrase is fine if that\'s the honest answer. No filler.', maxTokens: 512 },
-  normal:   { instruction: 'Keep responses focused and concise — aim for 2-4 paragraphs per turn.', maxTokens: 4096 },
-  detailed: { instruction: 'Provide thorough, detailed responses with examples and evidence. 4-8 paragraphs per turn is fine.', maxTokens: 8192 }
-};
-
-let currentLength = LENGTH_PRESETS[args.length] ? args.length : 'normal';
-
 // ─── Build system prompts ────────────────────────────────────────────────────
 function buildSystemPrompt(persona, isModerator = false) {
-  const lengthInstruction = LENGTH_PRESETS[currentLength].instruction;
-
   let prompt = `You ARE ${persona.name}. Your worldview, practices, and opinions are described below.
 
 PERSONA DOCUMENT:
@@ -195,7 +183,9 @@ ${'─'.repeat(60)}
 
 You are participating in a panel discussion with other experts. Speak in first person as ${persona.name}. Use your actual frameworks, language, and perspective. Be direct and specific.
 
-${lengthInstruction} You can reference what other participants said, agree, disagree, or build on their points. Don't repeat what's already been said.`;
+CRITICAL — Response length: Match your response length to what the conversation actually needs. A single word ("Yes."), one sentence, or several paragraphs — whatever fits. If you agree, just say so. If someone asked a yes/no question, answer it. Only elaborate when the point genuinely requires it. Never pad a response with extra context, caveats, or restated points just to fill space. Shorter is almost always better.
+
+You can reference what other participants said, agree, disagree, or build on their points. Don't repeat what's already been said.`;
 
   if (fileContext) {
     prompt += `\n\nCONTEXT — The following file has been shared for discussion:\n\n${fileContext}`;
@@ -219,7 +209,7 @@ async function streamAnthropic(system, messages, model, onChunk) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: LENGTH_PRESETS[currentLength].maxTokens,
+      max_tokens: 4096,
       stream: true,
       system,
       messages
@@ -283,7 +273,7 @@ async function streamOpenAI(system, messages, model, onChunk) {
     },
     body: JSON.stringify({
       model,
-      max_completion_tokens: LENGTH_PRESETS[currentLength].maxTokens,
+      max_completion_tokens: 4096,
       stream: true,
       stream_options: { include_usage: true },
       messages: oaiMessages
@@ -533,8 +523,7 @@ if (moderator) {
 if (args.topic) {
   console.log(`${DIM}  Topic: ${args.topic}${RESET}`);
 }
-console.log(`${DIM}  Length: ${currentLength} (max ${LENGTH_PRESETS[currentLength].maxTokens} tokens)${RESET}`);
-console.log(`${DIM}  Commands: /ask <question>  /brief  /normal  /detailed  /skip  /save  /quit${RESET}`);
+console.log(`${DIM}  Commands: /ask <question>  /skip  /save  /quit${RESET}`);
 console.log(`${BOLD}${'═'.repeat(60)}${RESET}\n`);
 
 const topic = args.topic || 'Share your perspectives on the current state of AI and software development.';
@@ -583,9 +572,6 @@ async function runDiscussion() {
       saveTranscript();
     } else if (trimmed === '/skip') {
       continue;
-    } else if (trimmed === '/brief' || trimmed === '/normal' || trimmed === '/detailed') {
-      currentLength = trimmed.slice(1);
-      console.log(`${DIM}Response length set to: ${currentLength} (max ${LENGTH_PRESETS[currentLength].maxTokens} tokens)${RESET}`);
     } else if (trimmed.startsWith('/ask ')) {
       const question = trimmed.slice(5);
       transcript.push({ speaker: 'User', text: question, round: currentRound + 1 });
