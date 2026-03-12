@@ -785,20 +785,23 @@ def load_config(start_dir, title=''):
 
 # ─── Templates ────────────────────────────────────────────────────────────────
 
-LTR_TEMPLATE = """\
+UNIFIED_TEMPLATE = """\
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="{{LANG}}" dir="{{DIR}}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Heebo:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&family=Assistant:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" id="hljs-dark" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
+<link rel="stylesheet" id="hljs-light" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css" disabled>
 <style>
 :root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#1E1E1E;--code-text:#d4d4d4;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
+[dir="rtl"]{--code-bg:#f5f5f5;--code-text:#1a1a2e}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+[dir="rtl"] body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;line-height:1.8}
 
 /* ── Header ── */
 .site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -809,8 +812,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .doc-title.visible{opacity:.9;pointer-events:auto}
 .doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
 .header-right{margin-left:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
-.header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
-.header-index:hover{background:rgba(255,255,255,.25);color:#fff}
+[dir="rtl"] .header-right{margin-left:0;margin-right:auto}
+.header-index{color:rgba(255,255,255,.9);text-decoration:none;font-size:.7rem;font-weight:500;padding:.3rem .7rem;border-radius:6px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);transition:all .15s;white-space:nowrap;display:flex;align-items:center;gap:.3rem}
+.header-index:hover{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.3)}
+.header-index svg{width:14px;height:14px;opacity:.7;flex-shrink:0}
+[dir="rtl"] .header-index svg{transform:scaleX(-1)}
 .org:empty{display:none}
 .header-home{display:flex;align-items:center;gap:1rem;text-decoration:none;color:inherit;transition:opacity .15s}
 .header-home:hover{opacity:.85}
@@ -820,12 +826,17 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
 /* ── Sidebar ── */
 .sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1rem .75rem;background:var(--surface);border-right:1px solid var(--border)}
+[dir="rtl"] .sidebar{border-right:none;border-left:1px solid var(--border)}
 .sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:1rem}
 .sidebar-card h3{font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.5rem;font-weight:600;padding:0 .5rem}
 .sidebar a{display:block;padding:.25rem .5rem;color:var(--text);text-decoration:none;font-size:.8rem;line-height:1.4;border-left:2px solid transparent;margin-bottom:1px;border-radius:0 4px 4px 0;transition:all .15s}
 .sidebar a:hover{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light)}
 .sidebar a.toc-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600}
 .sidebar a.h3-link{padding-left:1.5rem;font-size:.75rem;color:var(--muted)}
+[dir="rtl"] .sidebar a{border-left:none;border-right:2px solid transparent;border-radius:4px 0 0 4px}
+[dir="rtl"] .sidebar a:hover{border-left-color:transparent;border-right-color:var(--accent)}
+[dir="rtl"] .sidebar a.toc-active{border-left-color:transparent;border-right-color:var(--accent)}
+[dir="rtl"] .sidebar a.h3-link{padding-left:0;padding-right:1.5rem}
 /* ── Collapsible TOC ── */
 .sidebar details{margin-bottom:1px}
 .sidebar details summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.25rem;padding:.25rem .5rem;border-radius:0 4px 4px 0;transition:background .15s}
@@ -837,21 +848,32 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .sidebar details summary a{display:block;flex:1;padding:0;margin:0;border:none;border-radius:0}
 .sidebar details summary a:hover{background:none}
 .sidebar details .h3-link{padding-left:1.5rem}
+[dir="rtl"] .sidebar details summary{flex-direction:row-reverse;border-radius:4px 0 0 4px}
+[dir="rtl"] .sidebar details summary::before{display:none}
+[dir="rtl"] .sidebar details summary::after{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
+[dir="rtl"] .sidebar details[open] summary::after{transform:rotate(-90deg)}
+[dir="rtl"] .sidebar details .h3-link{padding-left:0;padding-right:1.5rem}
 /* ── Layout switcher ── */
-.layout-toolbar{display:flex;gap:.3rem;align-items:center}
-.layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
-.layout-toolbar button:hover{background:rgba(255,255,255,.25)}
-.layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
+.layout-toolbar{display:flex;gap:1px;align-items:center;background:rgba(255,255,255,.08);border-radius:6px;border:1px solid rgba(255,255,255,.15);overflow:hidden}
+.layout-toolbar button{background:none;border:none;border-radius:0;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:rgba(255,255,255,.7);transition:all .15s;font-weight:500}
+.layout-toolbar button:hover{background:rgba(255,255,255,.12);color:rgba(255,255,255,.95)}
+.layout-toolbar button.active{background:rgba(255,255,255,.2);color:#fff}
+/* ── Direction toggle ── */
+.dir-toggle{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:.3rem .55rem;font-size:.65rem;cursor:pointer;color:rgba(255,255,255,.9);transition:all .15s;font-weight:600;letter-spacing:.02em}
+.dir-toggle:hover{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.3)}
 .page.layout-narrow .content{max-width:860px}
 .page.layout-wide .content{max-width:1200px}
 .page.layout-wide{max-width:1600px}
 .page.layout-fluid{max-width:100%;margin:0;padding:0;display:block}
 .page.layout-fluid .sidebar{position:fixed;top:56px;left:0;width:280px;height:calc(100vh - 56px);z-index:10}
 .page.layout-fluid .content{max-width:100%;margin-left:280px;padding:2.5rem 3rem}
+[dir="rtl"] .page.layout-fluid .sidebar{left:auto;right:0}
+[dir="rtl"] .page.layout-fluid .content{margin-left:0;margin-right:280px}
 
 /* ── Mobile TOC toggle ── */
 .toc-toggle{display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
 .toc-toggle:hover{transform:scale(1.1)}
+[dir="rtl"] .toc-toggle{right:auto;left:1.5rem}
 
 /* ── Content ── */
 .content{padding:2.5rem 3.5rem;max-width:860px}
@@ -872,18 +894,27 @@ li input[type="checkbox"]{margin-right:.4rem}
 ul.checklist{list-style:none;padding-left:0}
 ul.checklist li{display:flex;align-items:baseline;gap:.4rem;padding:.25rem 0}
 blockquote{border-left:3px solid var(--accent);padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:0 var(--radius) var(--radius) 0}
+.warning-box{border-left:4px solid #f59e0b;background:#fffbeb;padding:1rem;border-radius:0 var(--radius) var(--radius) 0;margin:1rem 0}
+[dir="rtl"] ul,[dir="rtl"] ol{margin-left:0;padding-right:1.5rem}
+[dir="rtl"] li input[type="checkbox"]{margin-right:0;margin-left:.4rem}
+[dir="rtl"] ul.checklist{padding-right:0}
+[dir="rtl"] blockquote{border-left:none;border-right:3px solid var(--accent);border-radius:var(--radius) 0 0 var(--radius)}
+[dir="rtl"] .warning-box{border-left:none;border-right:4px solid #f59e0b;border-radius:var(--radius) 0 0 var(--radius)}
 
 /* ── Code ── */
 pre{background:var(--code-bg);color:var(--code-text);padding:1.15rem 1.25rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.85rem;box-shadow:inset 0 1px 3px rgba(0,0,0,.2)}
 code{font-family:'JetBrains Mono',monospace;font-size:.85em}
 p code,li code{background:#e8eaed;color:#c7254e;padding:.15rem .4rem;border-radius:4px}
 pre code{background:transparent;color:inherit;padding:0}
+[dir="rtl"] pre{direction:ltr;text-align:left;box-shadow:none;border:1px solid var(--border)}
+[dir="rtl"] code{direction:ltr}
 
 /* ── Tables ── */
 table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
 th,td{border:1px solid var(--border);padding:.6rem .8rem;text-align:left}
 th{background:var(--accent);color:#fff;font-weight:600}
 tr:nth-child(even){background:#f5f6f8}
+[dir="rtl"] th,[dir="rtl"] td{text-align:right}
 
 /* ── Misc ── */
 hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
@@ -922,18 +953,19 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
   </a>
   <span class="doc-title">{{TITLE}}</span>
   <div class="header-right">
-    <a href="index.html" class="header-index">&#128196; Index</a>
+    <a href="index.html" class="header-index"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg><span data-ltr="Back to Index" data-rtl="&#1495;&#1494;&#1512;&#1492; &#1500;&#1488;&#1497;&#1504;&#1491;&#1511;&#1505;">{{INDEX_LABEL}}</span></a>
+    <button class="dir-toggle" onclick="toggleDir()" id="btn-dir">{{DIR_LABEL}}</button>
     <div class="layout-toolbar">
-      <button onclick="setLayout('narrow')" id="btn-narrow">Narrow</button>
-      <button onclick="setLayout('wide')" id="btn-wide">Wide</button>
-      <button onclick="setLayout('fluid')" id="btn-fluid">Full</button>
+      <button onclick="setLayout('narrow')" id="btn-narrow" data-ltr="Narrow" data-rtl="&#1510;&#1512;">{{NARROW_LABEL}}</button>
+      <button onclick="setLayout('wide')" id="btn-wide" data-ltr="Wide" data-rtl="&#1512;&#1495;&#1489;">{{WIDE_LABEL}}</button>
+      <button onclick="setLayout('fluid')" id="btn-fluid" data-ltr="Full" data-rtl="&#1502;&#1500;&#1488;">{{FULL_LABEL}}</button>
     </div>
   </div>
 </header>
 <div class="page">
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-card">
-    <h3>Contents</h3>
+    <h3 data-ltr="Contents" data-rtl="&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;">{{TOC_LABEL}}</h3>
     {{TOC}}
   </div>
 </nav>
@@ -955,236 +987,35 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
 <script>
-function setLayout(mode){
-  var page=document.querySelector('.page');
-  page.classList.remove('layout-narrow','layout-wide','layout-fluid');
-  page.classList.add('layout-'+mode);
-  document.querySelectorAll('.layout-toolbar button').forEach(function(b){b.classList.remove('active')});
-  document.getElementById('btn-'+mode).classList.add('active');
-  try{localStorage.setItem('doc-layout',mode)}catch(e){}
+/* ── Direction toggle ── */
+function toggleDir(){
+  var html=document.documentElement;
+  var newDir=html.dir==='rtl'?'ltr':'rtl';
+  html.dir=newDir;
+  html.lang=newDir==='rtl'?'he':'en';
+  document.querySelectorAll('[data-ltr][data-rtl]').forEach(function(el){
+    el.textContent=newDir==='rtl'?el.dataset.rtl:el.dataset.ltr;
+  });
+  document.getElementById('hljs-dark').disabled=(newDir==='rtl');
+  document.getElementById('hljs-light').disabled=(newDir!=='rtl');
+  document.getElementById('btn-dir').textContent=newDir==='rtl'?'LTR':'RTL';
+  try{localStorage.setItem('doc-dir',newDir)}catch(e){}
 }
-(function(){var m=localStorage.getItem('doc-layout')||'narrow';setLayout(m)})();
 (function(){
-  var dt=document.querySelector('.doc-title');
-  var h1=document.querySelector('.doc-header h1');
-  if(!dt||!h1)return;
-  var obs=new IntersectionObserver(function(entries){
-    dt.classList.toggle('visible',!entries[0].isIntersecting);
-  },{threshold:0,rootMargin:'-56px 0px 0px 0px'});
-  obs.observe(h1);
-})();
-</script>
-<script>
-(function(){
-  var headings=document.querySelectorAll('.content h2[id], .content h3[id], .content h4[id]');
-  if(!headings.length)return;
-  var sidebar=document.getElementById('sidebar');
-  if(!sidebar)return;
-  var tocLinks=sidebar.querySelectorAll('a[href^="#"]');
-  var linkMap={};
-  tocLinks.forEach(function(a){linkMap[a.getAttribute('href').slice(1)]=a});
-  var current=null;
-  var observer=new IntersectionObserver(function(entries){
-    entries.forEach(function(entry){
-      if(entry.isIntersecting){
-        if(current)current.classList.remove('toc-active');
-        var link=linkMap[entry.target.id];
-        if(link){link.classList.add('toc-active');current=link;
-          // Open parent details if collapsed
-          var det=link.closest('details');
-          if(det)det.open=true;
-          // Scroll sidebar to keep active link visible
-          link.scrollIntoView({block:'nearest',behavior:'smooth'});
-        }
-      }
+  var saved=localStorage.getItem('doc-dir');
+  if(saved&&saved!==document.documentElement.dir){
+    document.documentElement.dir=saved;
+    document.documentElement.lang=saved==='rtl'?'he':'en';
+    document.querySelectorAll('[data-ltr][data-rtl]').forEach(function(el){
+      el.textContent=saved==='rtl'?el.dataset.rtl:el.dataset.ltr;
     });
-  },{rootMargin:'-80px 0px -60% 0px',threshold:0});
-  headings.forEach(function(h){observer.observe(h)});
+    document.getElementById('btn-dir').textContent=saved==='rtl'?'LTR':'RTL';
+  }
+  var dir=document.documentElement.dir||'ltr';
+  document.getElementById('hljs-dark').disabled=(dir==='rtl');
+  document.getElementById('hljs-light').disabled=(dir!=='rtl');
 })();
-</script>
-<script type="module">
-import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-mermaid.initialize({startOnLoad:true,theme:'dark'});
-</script>
-{{DIAGRAM_SCRIPTS}}
-{{NOTES_JS}}
-</body>
-</html>
-"""
-
-RTL_TEMPLATE = """\
-<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{TITLE}}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&family=Assistant:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css">
-<style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#f5f5f5;--code-text:#1a1a2e;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.8;direction:rtl}
-
-/* ── Header ── */
-.site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.logo-circle{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.1)}
-.site-header .header-text h1{font-size:1rem;font-weight:600;margin:0;line-height:1.3}
-.site-header .header-text .org{font-size:.75rem;opacity:.8;margin:0}
-.doc-title{font-size:1rem;font-weight:500;opacity:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45vw;transition:opacity .25s;pointer-events:none}
-.doc-title.visible{opacity:.9;pointer-events:auto}
-.doc-title::before{content:'\\2022';margin:0 .6rem;opacity:.4}
-.header-right{margin-right:auto;display:flex;align-items:center;gap:.5rem;flex-shrink:0}
-.header-index{color:rgba(255,255,255,.85);text-decoration:none;font-size:.75rem;font-weight:500;padding:.25rem .6rem;border-radius:4px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);transition:all .15s;white-space:nowrap}
-.header-index:hover{background:rgba(255,255,255,.25);color:#fff}
-.org:empty{display:none}
-.header-home{display:flex;align-items:center;gap:1rem;text-decoration:none;color:inherit;transition:opacity .15s}
-.header-home:hover{opacity:.85}
-
-/* ── Layout ── */
-.page{display:grid;grid-template-columns:280px 1fr;max-width:1300px;margin:0 auto;min-height:calc(100vh - 56px)}
-
-/* ── Sidebar ── */
-.sidebar{position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:1rem .75rem;background:var(--surface);border-right:none;border-left:1px solid var(--border)}
-.sidebar-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:1rem}
-.sidebar-card h3{font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.5rem;font-weight:600;padding:0 .5rem}
-.sidebar a{display:block;padding:.25rem .5rem;color:var(--text);text-decoration:none;font-size:.8rem;line-height:1.4;border-right:2px solid transparent;border-left:none;margin-bottom:1px;border-radius:4px 0 0 4px;transition:all .15s}
-.sidebar a:hover{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light)}
-.sidebar a.toc-active{color:var(--accent);border-right-color:var(--accent);background:var(--accent-light);font-weight:600}
-.sidebar a.h3-link{padding-right:1.5rem;font-size:.75rem;color:var(--muted)}
-/* ── Collapsible TOC ── */
-.sidebar details{margin-bottom:1px}
-.sidebar details summary{list-style:none;cursor:pointer;display:flex;align-items:center;flex-direction:row-reverse;gap:.25rem;padding:.25rem .5rem;border-radius:4px 0 0 4px;transition:background .15s}
-.sidebar details summary:hover{background:var(--accent-light)}
-.sidebar details summary::-webkit-details-marker{display:none}
-.sidebar details summary::after{content:'';display:block;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid var(--muted);flex-shrink:0;transition:transform .15s}
-.sidebar details[open] summary::after{transform:rotate(-90deg)}
-.sidebar details summary::before{display:none}
-.sidebar details summary a{display:block;flex:1;padding:0;margin:0;border:none;border-radius:0}
-.sidebar details summary a:hover{background:none}
-.sidebar details .h3-link{padding-right:1.5rem}
 /* ── Layout switcher ── */
-.layout-toolbar{display:flex;gap:.3rem;align-items:center}
-.layout-toolbar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.2rem .55rem;font-size:.7rem;cursor:pointer;color:rgba(255,255,255,.8);transition:all .15s}
-.layout-toolbar button:hover{background:rgba(255,255,255,.25)}
-.layout-toolbar button.active{background:rgba(255,255,255,.35);color:#fff;border-color:rgba(255,255,255,.5)}
-.page.layout-narrow .content{max-width:860px}
-.page.layout-wide .content{max-width:1200px}
-.page.layout-wide{max-width:1600px}
-.page.layout-fluid{max-width:100%;margin:0;padding:0;display:block}
-.page.layout-fluid .sidebar{position:fixed;top:56px;right:0;width:280px;height:calc(100vh - 56px);z-index:10}
-.page.layout-fluid .content{max-width:100%;margin-right:280px;padding:2.5rem 3rem}
-
-/* ── Mobile TOC toggle ── */
-.toc-toggle{display:none;position:fixed;bottom:1.5rem;left:1.5rem;z-index:100;background:var(--accent);color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:1.3rem;cursor:pointer;box-shadow:0 3px 12px rgba(37,99,235,.4);transition:transform .2s}
-.toc-toggle:hover{transform:scale(1.1)}
-
-/* ── Content ── */
-.content{padding:2.5rem 3.5rem;max-width:860px}
-.doc-header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:2px solid var(--border)}
-.doc-header h1{font-size:2rem;font-weight:700;margin-bottom:.4rem;color:var(--text)}
-.subtitle{color:var(--muted);font-size:1.05rem}
-.date{color:var(--muted);font-size:.8rem;margin-top:.4rem}
-
-/* ── Typography ── */
-h2{font-size:1.4rem;font-weight:600;margin:2.5rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--accent-light)}
-h3{font-size:1.15rem;font-weight:600;margin:1.75rem 0 .75rem}
-h4{font-size:1rem;font-weight:600;margin:1.25rem 0 .5rem}
-p{margin-bottom:1rem}
-a{color:var(--accent)}
-ul,ol{margin:0 0 1rem 0;padding-right:1.5rem}
-li{margin-bottom:.35rem}
-li input[type="checkbox"]{margin-left:.4rem}
-ul.checklist{list-style:none;padding-right:0}
-ul.checklist li{display:flex;align-items:baseline;gap:.4rem;padding:.25rem 0}
-blockquote{border-right:3px solid var(--accent);border-left:none;padding:.75rem 1rem;margin:1rem 0;background:var(--accent-light);border-radius:var(--radius) 0 0 var(--radius)}
-
-/* ── Warning boxes ── */
-.warning-box{border-right:4px solid #f59e0b;background:#fffbeb;padding:1rem;border-radius:0 var(--radius) var(--radius) 0;margin:1rem 0}
-
-/* ── Code ── */
-pre{background:var(--code-bg);color:var(--code-text);padding:1.15rem 1.25rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.85rem;direction:ltr;text-align:left;border:1px solid var(--border)}
-code{font-family:'JetBrains Mono',monospace;font-size:.85em;direction:ltr}
-p code,li code{background:#e8eaed;color:#c7254e;padding:.15rem .4rem;border-radius:4px}
-pre code{background:transparent;color:inherit;padding:0}
-
-/* ── Tables ── */
-table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
-th,td{border:1px solid var(--border);padding:.6rem .8rem;text-align:right}
-th{background:var(--accent);color:#fff;font-weight:600}
-tr:nth-child(even){background:#f5f6f8}
-
-/* ── Misc ── */
-hr{border:none;border-top:1px solid var(--border);margin:2rem 0}
-img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
-.footer{margin-top:3rem;padding:1.5rem 0;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem;display:flex;justify-content:space-between;align-items:center}
-
-/* ── Print ── */
-@media print{
-  .site-header{background:var(--accent)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .sidebar,.toc-toggle{display:none!important}
-  .page{grid-template-columns:1fr}
-  .content{padding:1rem;max-width:100%}
-  pre{white-space:pre-wrap;word-break:break-all}
-}
-
-/* ── Mobile ── */
-@media(max-width:768px){
-  .page{grid-template-columns:1fr}
-  .sidebar{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99;height:100vh;border:none;box-shadow:0 0 30px rgba(0,0,0,.3)}
-  .sidebar.open{display:block}
-  .toc-toggle{display:flex;align-items:center;justify-content:center}
-  .content{padding:1.5rem}
-}
-{{DIAGRAM_CSS}}
-{{NOTES_CSS}}
-</style>
-</head>
-<body>
-<header class="site-header">
-  <a href="index.html" class="header-home">
-    <div class="logo-circle">{{LOGO_TEXT}}</div>
-    <div class="header-text">
-      <h1>{{PROJECT_NAME}}</h1>
-      <div class="org">{{ORG_NAME}}</div>
-    </div>
-  </a>
-  <span class="doc-title">{{TITLE}}</span>
-  <div class="header-right">
-    <a href="index.html" class="header-index">&#128196; &#1488;&#1497;&#1504;&#1491;&#1511;&#1505;</a>
-    <div class="layout-toolbar">
-      <button onclick="setLayout('narrow')" id="btn-narrow">&#1510;&#1512;</button>
-      <button onclick="setLayout('wide')" id="btn-wide">&#1512;&#1495;&#1489;</button>
-      <button onclick="setLayout('fluid')" id="btn-fluid">&#1502;&#1500;&#1488;</button>
-    </div>
-  </div>
-</header>
-<div class="page">
-<nav class="sidebar" id="sidebar">
-  <div class="sidebar-card">
-    <h3>&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</h3>
-    {{TOC}}
-  </div>
-</nav>
-<main class="content">
-<div class="doc-header">
-<h1>{{TITLE}}</h1>
-<div class="subtitle">{{SUBTITLE}}</div>
-<div class="date">{{GENERATION_DATE}}</div>
-</div>
-{{CONTENT}}
-<script type="text/plain" id="md-source">{{MD_SOURCE}}</script>
-<div class="footer">
-  <span>{{FOOTER_TEXT}}</span>
-  <span>Generated: {{GENERATION_DATE}}</span>
-</div>
-</main>
-</div>
-<button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209; &#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;</button>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script>hljs.highlightAll();</script>
-<script>
 function setLayout(mode){
   var page=document.querySelector('.page');
   page.classList.remove('layout-narrow','layout-wide','layout-fluid');
@@ -1232,13 +1063,14 @@ function setLayout(mode){
 </script>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-mermaid.initialize({startOnLoad:true,theme:'default'});
+mermaid.initialize({startOnLoad:true,theme:document.documentElement.dir==='rtl'?'default':'dark'});
 </script>
 {{DIAGRAM_SCRIPTS}}
 {{NOTES_JS}}
 </body>
 </html>
 """
+
 
 INDEX_TEMPLATE = """\
 <!DOCTYPE html>
@@ -1758,7 +1590,7 @@ def convert_file(md_path: str) -> str:
     gen_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     is_rtl = is_hebrew(md_text)
-    template = RTL_TEMPLATE if is_rtl else LTR_TEMPLATE
+    template = UNIFIED_TEMPLATE
 
     config = load_config(md_path.parent, title=title)
 
@@ -1782,7 +1614,23 @@ def convert_file(md_path: str) -> str:
              .replace('{{DIAGRAM_CSS}}', DIAGRAM_CSS if has_diagrams else '')
              .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else '')
              .replace('{{NOTES_CSS}}', NOTES_CSS if config.get('enableNotes', True) else '')
-             .replace('{{NOTES_JS}}', NOTES_JS if config.get('enableNotes', True) else ''))
+             .replace('{{NOTES_JS}}', NOTES_JS if config.get('enableNotes', True) else '')
+             .replace('{{DIR}}', 'rtl' if is_rtl else 'ltr')
+             .replace('{{LANG}}', 'he' if is_rtl else 'en'))
+
+    # Bilingual labels based on initial direction
+    if is_rtl:
+        lbl = {'{{INDEX_LABEL}}': '&#1495;&#1494;&#1512;&#1492; &#1500;&#1488;&#1497;&#1504;&#1491;&#1511;&#1505;',
+               '{{NARROW_LABEL}}': '&#1510;&#1512;', '{{WIDE_LABEL}}': '&#1512;&#1495;&#1489;',
+               '{{FULL_LABEL}}': '&#1502;&#1500;&#1488;',
+               '{{TOC_LABEL}}': '&#1514;&#1493;&#1499;&#1503; &#1506;&#1504;&#1497;&#1497;&#1504;&#1497;&#1501;',
+               '{{DIR_LABEL}}': 'LTR'}
+    else:
+        lbl = {'{{INDEX_LABEL}}': 'Back to Index', '{{NARROW_LABEL}}': 'Narrow',
+               '{{WIDE_LABEL}}': 'Wide', '{{FULL_LABEL}}': 'Full',
+               '{{TOC_LABEL}}': 'Contents', '{{DIR_LABEL}}': 'RTL'}
+    for key, val in lbl.items():
+        final = final.replace(key, val)
 
     # Apply config-driven accent colors to :root CSS variables
     css_overrides = {
