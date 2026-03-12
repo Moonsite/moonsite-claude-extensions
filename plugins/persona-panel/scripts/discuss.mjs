@@ -263,7 +263,7 @@ async function streamOpenAI(system, messages, model, onChunk) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
       stream: true,
       messages: oaiMessages
     })

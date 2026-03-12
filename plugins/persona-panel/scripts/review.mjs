@@ -255,7 +255,7 @@ async function callOpenAI(system, userContent, model, maxTokens = 16384) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: userContent }
