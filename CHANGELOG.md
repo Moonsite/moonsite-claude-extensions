@@ -6,6 +6,16 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.2.15] — 2026-03-12
+
+### md-html-docs 2.3.14
+- Merge LTR/RTL templates into unified template with live direction toggle
+- Direction toggle button in header toolbar (persists to localStorage)
+- Bilingual UI labels (Back to Index, Narrow/Wide/Full, Contents) switch with direction
+- Both font families (Inter + Heebo/Rubik/Assistant) and hljs themes loaded upfront
+- `[dir="rtl"]` CSS overrides for all directional properties (sidebar, TOC arrows, blockquotes, code, tables)
+- Header toolbar redesign: "Back to Index" with SVG arrow, pill-shaped layout switcher
+
 ## [1.2.14] — 2026-03-11
 
 ### md-html-docs 2.3.13
