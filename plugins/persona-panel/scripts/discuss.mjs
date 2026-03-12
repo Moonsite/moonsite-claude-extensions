@@ -455,12 +455,20 @@ ${args.file ? `**File context:** ${args.file}` : ''}
 }
 
 // ─── User input ──────────────────────────────────────────────────────────────
-const rl = createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+const isInteractive = process.stdin.isTTY === true;
+
+let rl;
+if (isInteractive) {
+  rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+} else {
+  console.log(`${DIM}Non-interactive mode — auto-continuing all rounds${RESET}`);
+}
 
 function prompt(question) {
+  if (!isInteractive) return Promise.resolve('');
   return new Promise((resolve) => {
     rl.question(question, resolve);
   });
@@ -473,7 +481,7 @@ process.on('SIGINT', () => {
   exiting = true;
   console.log(`\n\n${DIM}Saving transcript...${RESET}`);
   saveTranscript();
-  rl.close();
+  if (rl) rl.close();
   process.exit(0);
 });
 
@@ -558,12 +566,12 @@ async function runDiscussion() {
 
   // Save transcript
   saveTranscript();
-  rl.close();
+  if (rl) rl.close();
 }
 
 runDiscussion().catch(e => {
   console.error(`\nFatal error: ${e.message}`);
   saveTranscript();
-  rl.close();
+  if (rl) rl.close();
   process.exit(1);
 });
