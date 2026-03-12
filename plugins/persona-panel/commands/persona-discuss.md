@@ -53,13 +53,22 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/discuss.mjs \
   [--with name1,name2] \
   [--moderator <name>] \
   [--style structured|loose|devil|"custom text"] \
-  [--duration quick|standard|deep|until-done]
+  [--duration quick|standard|deep|until-done] \
+  [--length brief|normal|detailed]
 ```
+
+The `--length` flag controls response verbosity:
+- `brief` — 1-3 sentences, max 512 tokens. Use when you want direct yes/no answers and quick takes.
+- `normal` (default) — 2-4 paragraphs, max 4096 tokens.
+- `detailed` — 4-8 paragraphs with examples, max 8192 tokens.
 
 ## Step 5: Discussion Controls
 
 The discussion runs interactively. Available commands:
 - `/ask <question>` — inject a question or comment into the discussion
+- `/brief` — switch to brief responses (1-3 sentences)
+- `/normal` — switch to normal responses (2-4 paragraphs)
+- `/detailed` — switch to detailed responses (4-8 paragraphs)
 - `/skip` — skip to the next speaker
 - `/save` — save transcript so far
 - `/quit` — end discussion and save transcript
