@@ -1,0 +1,9 @@
+{
+  "name": "Nate",
+  "shortName": "nate",
+  "provider": "openai",
+  "model": "gpt-5.4",
+  "color": "yellow",
+  "sourceType": "web",
+  "bundled": true
+}

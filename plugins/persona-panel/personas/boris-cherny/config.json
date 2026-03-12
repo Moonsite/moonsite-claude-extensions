@@ -1,0 +1,9 @@
+{
+  "name": "Boris Cherny",
+  "shortName": "cherny",
+  "provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "color": "cyan",
+  "sourceType": "web",
+  "bundled": true
+}
