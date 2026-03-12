@@ -6,6 +6,12 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.2.16] — 2026-03-12
+
+### md-html-docs 2.3.15
+- Add `released` field to SKILL.md frontmatter
+- Display skill version and release date banner on invocation
+
 ## [1.2.15] — 2026-03-12
 
 ### md-html-docs 2.3.14
