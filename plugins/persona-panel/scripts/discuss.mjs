@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { createInterface } from 'readline';
+import { CostTracker } from './costs.mjs';
 
 // ─── .env loader ─────────────────────────────────────────────────────────────
 function loadEnv() {
@@ -219,6 +220,7 @@ async function streamAnthropic(system, messages, model, onChunk) {
   }
 
   let fullText = '';
+  const usage = { input: 0, output: 0 };
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -238,15 +240,21 @@ async function streamAnthropic(system, messages, model, onChunk) {
 
       try {
         const event = JSON.parse(data);
+        if (event.type === 'message_start' && event.message?.usage) {
+          usage.input = event.message.usage.input_tokens || 0;
+        }
         if (event.type === 'content_block_delta' && event.delta?.text) {
           fullText += event.delta.text;
           onChunk(event.delta.text);
+        }
+        if (event.type === 'message_delta' && event.usage) {
+          usage.output = event.usage.output_tokens || 0;
         }
       } catch {}
     }
   }
 
-  return fullText;
+  return { text: fullText, usage };
 }
 
 async function streamOpenAI(system, messages, model, onChunk) {
@@ -265,6 +273,7 @@ async function streamOpenAI(system, messages, model, onChunk) {
       model,
       max_completion_tokens: 4096,
       stream: true,
+      stream_options: { include_usage: true },
       messages: oaiMessages
     })
   });
@@ -275,6 +284,7 @@ async function streamOpenAI(system, messages, model, onChunk) {
   }
 
   let fullText = '';
+  const usage = { input: 0, output: 0 };
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -299,11 +309,15 @@ async function streamOpenAI(system, messages, model, onChunk) {
           fullText += content;
           onChunk(content);
         }
+        if (event.usage) {
+          usage.input = event.usage.prompt_tokens || 0;
+          usage.output = event.usage.completion_tokens || 0;
+        }
       } catch {}
     }
   }
 
-  return fullText;
+  return { text: fullText, usage };
 }
 
 // ─── Conversation history ────────────────────────────────────────────────────
@@ -352,6 +366,7 @@ class ConversationManager {
 
 // ─── Discussion engine ───────────────────────────────────────────────────────
 const conversation = new ConversationManager();
+const tracker = new CostTracker();
 const transcript = [];
 let currentRound = 0;
 
@@ -386,20 +401,26 @@ async function speakAs(persona, prompt, isModerator = false) {
   process.stdout.write(colorize('│ ', color));
 
   let fullResponse = '';
+  let turnUsage = { input: 0, output: 0 };
   const streamFn = persona.provider === 'openai' ? streamOpenAI : streamAnthropic;
 
   try {
-    fullResponse = await streamFn(system, messages, persona.model, (chunk) => {
+    const result = await streamFn(system, messages, persona.model, (chunk) => {
       // Handle newlines for box drawing
       const formatted = chunk.replace(/\n/g, `\n${colorize('│ ', color)}`);
       process.stdout.write(colorize(formatted, color));
     });
+    fullResponse = result.text;
+    turnUsage = result.usage;
   } catch (e) {
     process.stdout.write(`\n${colorize('│ ', color)}${BOLD}\x1b[31m[Error: ${e.message}]${RESET}`);
     fullResponse = `[Error: ${e.message}]`;
   }
 
-  process.stdout.write(`\n${colorize('└─', color)}${RESET}\n`);
+  // Track cost
+  tracker.add(persona.model, turnUsage.input, turnUsage.output, persona.shortName);
+  const costLine = tracker.formatEntry(persona.model, turnUsage.input, turnUsage.output);
+  process.stdout.write(`\n${colorize('└─', color)} ${DIM}${costLine} · running: ${tracker.formatRunningTotal()}${RESET}\n`);
 
   // Save to histories
   conversation.addAssistantMessage(persona.shortName, fullResponse);
@@ -449,8 +470,11 @@ ${args.file ? `**File context:** ${args.file}` : ''}
     content += `### ${entry.speaker}\n\n${entry.text}\n\n`;
   }
 
+  content += `\n---\n\n${tracker.summaryMarkdown()}\n`;
+
   writeFileSync(path, content);
-  console.log(`\n${DIM}Transcript saved to: ${path}${RESET}`);
+  console.log(`\n${tracker.summary()}`);
+  console.log(`${DIM}Transcript saved to: ${path}${RESET}`);
   return path;
 }
 

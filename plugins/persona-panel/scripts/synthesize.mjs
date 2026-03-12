@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
+import { CostTracker, normalizeUsage } from './costs.mjs';
 
 // ─── .env loader ─────────────────────────────────────────────────────────────
 function loadEnv() {
@@ -115,6 +116,7 @@ async function callOpenAI(system, userContent, maxTokens = 16384) {
 }
 
 const callLLM = provider === 'openai' ? callOpenAI : callAnthropic;
+const tracker = new CostTracker();
 
 // ─── Pass 1: Batch extraction (if large source) ─────────────────────────────
 const WORD_THRESHOLD = 10000;
@@ -148,7 +150,9 @@ Be thorough. Preserve specific quotes, numbers, and named concepts. This extract
   for (let i = 0; i < chunks.length; i++) {
     console.log(`  Extracting chunk ${i + 1}/${chunks.length}...`);
     const result = await callLLM(EXTRACTION_SYSTEM, chunks[i], 8000);
-    console.log(`  Done: ${JSON.stringify(result.usage)}`);
+    const u = normalizeUsage(result.usage);
+    tracker.add(model, u.input, u.output, `pass1-chunk${i + 1}`);
+    console.log(`  Done: ${tracker.formatEntry(model, u.input, u.output)}`);
     extractions.push(result.text);
   }
 
@@ -198,7 +202,9 @@ Based on everything above, what specific things would ${args.name} focus on, pra
 Be extremely specific. Use their actual language and frameworks. This document will be used to generate reviews and discussion contributions in their voice.`;
 
 const pass2 = await callLLM(PERSONA_SYSTEM, extractedContent, 12000);
-console.log(`Pass 2 done: ${JSON.stringify(pass2.usage)}`);
+const pass2Usage = normalizeUsage(pass2.usage);
+tracker.add(model, pass2Usage.input, pass2Usage.output, 'pass2-synthesis');
+console.log(`Pass 2 done: ${tracker.formatEntry(model, pass2Usage.input, pass2Usage.output)}`);
 
 // ─── Save output ─────────────────────────────────────────────────────────────
 const outputDir = resolve(args.output);
@@ -213,3 +219,4 @@ console.log(`  persona.md: ${pass2.text.length} chars`);
 console.log(`  sources.md: ${sourceContent.length} chars`);
 console.log(`  Output: ${outputDir}`);
 console.log('═'.repeat(60));
+console.log(`\n${tracker.summary()}`);

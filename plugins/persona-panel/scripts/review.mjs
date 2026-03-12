@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'fs';
 import { join, basename, extname, resolve, dirname } from 'path';
+import { CostTracker, normalizeUsage } from './costs.mjs';
 
 // ─── .env loader ─────────────────────────────────────────────────────────────
 function loadEnv() {
@@ -268,12 +269,15 @@ async function callOpenAI(system, userContent, model, maxTokens = 16384) {
 }
 
 // ─── Generate review ─────────────────────────────────────────────────────────
+const tracker = new CostTracker();
 console.log(`Generating review as ${config.name}...\n`);
 
 const callFn = config.provider === 'openai' ? callOpenAI : callAnthropic;
 const result = await callFn(REVIEW_SYSTEM, resolved.content, config.model);
 
-console.log(`Done: ${JSON.stringify(result.usage)}\n`);
+const usage = normalizeUsage(result.usage);
+tracker.add(config.model, usage.input, usage.output, 'review');
+console.log(`Done: ${tracker.formatEntry(config.model, usage.input, usage.output)}\n`);
 
 // ─── Save output ─────────────────────────────────────────────────────────────
 const date = new Date().toISOString().substring(0, 10);
@@ -296,6 +300,11 @@ writeFileSync(outputPath, `# ${config.name} — Persona Review
 ---
 
 ${result.text}
+
+---
+
+${tracker.summaryMarkdown()}
 `);
 
 console.log(`Review saved to: ${outputPath}`);
+console.log(`\n${tracker.summary()}`);
