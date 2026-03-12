@@ -6,6 +6,22 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.3.1] — 2026-03-12
+
+### persona-panel 1.0.1
+- Add save/load persona commands for reusable persona sets
+- Add review-all command for batch document review
+- Fix OpenAI max_tokens parameter for GPT-5.4
+- Handle non-interactive mode in discuss.mjs for Claude Code Bash tool
+
+## [1.3.0] — 2026-03-12
+
+### persona-panel 1.0.0
+- Initial release: AI persona panel plugin
+- Synthesize expert personas from sources (URLs, files, topics)
+- Multi-persona document/code review with scoring
+- Live multi-persona discussions with moderator support
+
 ## [1.2.16] — 2026-03-12
 
 ### md-html-docs 2.3.15

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -74,7 +74,7 @@
       "name": "persona-panel",
       "source": "./plugins/persona-panel",
       "description": "AI persona panel — synthesize expert personas, have them review documents/code/ideas, and run live multi-persona discussions with moderator support",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": {
         "name": "Boris Sigalov"
       },
