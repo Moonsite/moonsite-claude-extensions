@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'fs';
 import { join, basename, extname, resolve, dirname } from 'path';
-import { CostTracker, normalizeUsage } from './costs.mjs';
+import { CostTracker, normalizeUsage, logCost } from './costs.mjs';
 
 // ─── .env loader ─────────────────────────────────────────────────────────────
 function loadEnv() {
-  const paths = ['.env', join(process.cwd(), '.env')];
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const paths = ['.env', join(process.cwd(), '.env'), join(home, '.env')];
   for (const p of paths) {
     try {
       const content = readFileSync(p, 'utf-8');
       for (const line of content.split('\n')) {
         const m = line.match(/^([^#=]+)=(.*)$/);
-        if (m) process.env[m[1].trim()] = m[2].trim();
+        if (m && !process.env[m[1].trim()]) process.env[m[1].trim()] = m[2].trim();
       }
-      return;
     } catch {}
   }
 }
@@ -27,13 +27,14 @@ function parseArgs(argv) {
     else if (argv[i] === '--target') args.target = argv[++i];
     else if (argv[i] === '--output') args.output = argv[++i];
     else if (argv[i] === '--type') args.type = argv[++i];
+    else if (argv[i] === '--context') args.context = argv[++i];
   }
   return args;
 }
 
 const args = parseArgs(process.argv);
 if (!args.persona || !args.target) {
-  console.error('Usage: review.mjs --persona <dir> --target <path-or-text> [--output <path>] [--type code|doc|idea]');
+  console.error('Usage: review.mjs --persona <dir> --target <path-or-text> [--output <path>] [--type code|doc|idea] [--context <json>]');
   process.exit(1);
 }
 
@@ -213,11 +214,26 @@ const TYPE_INSTRUCTIONS = {
 - Concrete next steps you'd recommend`
 };
 
+// ─── Build context section ──────────────────────────────────────────────────
+let contextSection = '';
+if (args.context) {
+  try {
+    const entries = JSON.parse(args.context);
+    if (Array.isArray(entries) && entries.length > 0) {
+      const lines = entries.map(e => `- ${e.text} (added ${e.added})`).join('\n');
+      contextSection = `\nCONTEXT UPDATES:\n${lines}\n`;
+      console.log(`Context: ${entries.length} note(s) loaded`);
+    }
+  } catch (e) {
+    console.warn(`Warning: failed to parse --context JSON: ${e.message}`);
+  }
+}
+
 const REVIEW_SYSTEM = `You ARE ${config.name}. Your worldview, practices, and opinions are described in the persona document below.
 
 PERSONA DOCUMENT:
 ${personaDoc}
-
+${contextSection}
 ${'─'.repeat(60)}
 
 Now review the following content AS ${config.name}. Write in first person. Use your actual experience, frameworks, and language. Be specific, not generic.
@@ -227,6 +243,21 @@ ${TYPE_INSTRUCTIONS[reviewType]}
 Structure your review with clear sections. Be direct and practical — give your honest assessment based on your specific expertise and perspective.`;
 
 // ─── API call ────────────────────────────────────────────────────────────────
+async function parseApiResponse(resp, provider) {
+  if (!resp.ok) {
+    const body = await resp.text();
+    const isHtml = body.trimStart().startsWith('<');
+    const detail = isHtml ? `(HTTP ${resp.status} — got HTML instead of JSON, check API key / endpoint)` : body;
+    throw new Error(`${provider} API error ${resp.status}: ${detail}`);
+  }
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const body = await resp.text();
+    throw new Error(`${provider} API returned unexpected content-type "${ct}": ${body.substring(0, 200)}`);
+  }
+  return resp.json();
+}
+
 async function callAnthropic(system, userContent, model, maxTokens = 16384) {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -242,7 +273,7 @@ async function callAnthropic(system, userContent, model, maxTokens = 16384) {
       messages: [{ role: 'user', content: userContent }]
     })
   });
-  const data = await resp.json();
+  const data = await parseApiResponse(resp, 'Anthropic');
   if (data.error) throw new Error(`Anthropic API error: ${JSON.stringify(data.error)}`);
   return { text: data.content[0].text, usage: data.usage };
 }
@@ -263,20 +294,45 @@ async function callOpenAI(system, userContent, model, maxTokens = 16384) {
       ]
     })
   });
-  const data = await resp.json();
+  const data = await parseApiResponse(resp, 'OpenAI');
   if (data.error) throw new Error(`OpenAI API error: ${JSON.stringify(data.error)}`);
   return { text: data.choices[0].message.content, usage: data.usage };
+}
+
+async function callGemini(system, userContent, model, maxTokens = 16384) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      generationConfig: { maxOutputTokens: maxTokens }
+    })
+  });
+  const data = await parseApiResponse(resp, 'Gemini');
+  if (data.error) throw new Error(`Gemini API error: ${JSON.stringify(data.error)}`);
+  const text = data.candidates[0].content.parts.map(p => p.text).join('');
+  const usage = {
+    input_tokens: data.usageMetadata?.promptTokenCount ?? 0,
+    output_tokens: data.usageMetadata?.candidatesTokenCount ?? 0
+  };
+  return { text, usage };
 }
 
 // ─── Generate review ─────────────────────────────────────────────────────────
 const tracker = new CostTracker();
 console.log(`Generating review as ${config.name}...\n`);
 
-const callFn = config.provider === 'openai' ? callOpenAI : callAnthropic;
+const PROVIDER_FNS = { openai: callOpenAI, anthropic: callAnthropic, gemini: callGemini };
+const callFn = PROVIDER_FNS[config.provider] || callAnthropic;
 const result = await callFn(REVIEW_SYSTEM, resolved.content, config.model);
 
 const usage = normalizeUsage(result.usage);
-tracker.add(config.model, usage.input, usage.output, 'review');
+const entryCost = tracker.add(config.model, usage.input, usage.output, 'review');
+logCost({ model: config.model, provider: config.provider, inputTokens: usage.input, outputTokens: usage.output, cost: entryCost, action: 'review', persona: config.shortName });
 console.log(`Done: ${tracker.formatEntry(config.model, usage.input, usage.output)}\n`);
 
 // ─── Save output ─────────────────────────────────────────────────────────────

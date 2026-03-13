@@ -1,7 +1,7 @@
 ---
 name: bump-release
 description: "Bump version across all project files, commit, push, and create PR. Use when the user says 'bump version', 'release', 'bump-release', 'cut a release', 'version bump', or similar."
-version: 1.0.2
+version: 1.0.3
 ---
 
 # Bump Release

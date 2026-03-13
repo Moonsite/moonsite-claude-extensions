@@ -1,3 +1,7 @@
+import { appendFileSync, mkdirSync, existsSync } from 'fs';
+import { join, basename } from 'path';
+import { execSync } from 'child_process';
+
 // ─── Token cost monitoring ───────────────────────────────────────────────────
 // Pricing: [input $/1M tokens, output $/1M tokens]
 // Update as providers change pricing.
@@ -17,6 +21,10 @@ const MODEL_PRICING = {
   'o3':                         [10.00,  40.00],
   'o3-mini':                    [1.10,   4.40],
   'o4-mini':                    [1.10,   4.40],
+  // Google Gemini
+  'gemini-2.5-pro':             [1.25,  10.00],
+  'gemini-2.5-flash':           [0.15,   0.60],
+  'gemini-2.0-flash':           [0.10,   0.40],
 };
 
 function findPricing(model) {
@@ -135,4 +143,44 @@ export class CostTracker {
 
     return lines.join('\n');
   }
+}
+
+// ─── Persistent cost logging ────────────────────────────────────────────────
+
+function detectProject() {
+  try {
+    const root = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return basename(root);
+  } catch {
+    return basename(process.cwd());
+  }
+}
+
+/**
+ * Append a cost entry to both global (~/.persona-panel/cost-log.jsonl)
+ * and project (.claude/persona-panel-costs.jsonl) logs.
+ */
+export function logCost({ model, provider, inputTokens, outputTokens, cost, action, persona }) {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const entry = JSON.stringify({
+    ts: new Date().toISOString(),
+    project: detectProject(),
+    action: action || 'call',
+    persona: persona || '',
+    provider: provider || '',
+    model,
+    in: inputTokens,
+    out: outputTokens,
+    cost: cost !== null && cost !== undefined ? +cost.toFixed(6) : null
+  }) + '\n';
+
+  // Global log
+  const globalDir = join(home, '.persona-panel');
+  try { mkdirSync(globalDir, { recursive: true }); appendFileSync(join(globalDir, 'cost-log.jsonl'), entry); } catch {}
+
+  // Project log
+  try {
+    if (!existsSync('.claude')) mkdirSync('.claude', { recursive: true });
+    appendFileSync(join('.claude', 'persona-panel-costs.jsonl'), entry);
+  } catch {}
 }

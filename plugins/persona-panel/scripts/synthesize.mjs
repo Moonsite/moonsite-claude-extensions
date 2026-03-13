@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
-import { CostTracker, normalizeUsage } from './costs.mjs';
+import { CostTracker, normalizeUsage, logCost } from './costs.mjs';
 
 // ─── .env loader ─────────────────────────────────────────────────────────────
 function loadEnv() {
-  const paths = ['.env', join(process.cwd(), '.env')];
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const paths = ['.env', join(process.cwd(), '.env'), join(home, '.env')];
   for (const p of paths) {
     try {
       const content = readFileSync(p, 'utf-8');
       for (const line of content.split('\n')) {
         const m = line.match(/^([^#=]+)=(.*)$/);
-        if (m) process.env[m[1].trim()] = m[2].trim();
+        if (m && !process.env[m[1].trim()]) process.env[m[1].trim()] = m[2].trim();
       }
-      return;
     } catch {}
   }
 }
@@ -74,6 +74,21 @@ try {
 console.log(`Source: ${sourceContent.length} chars (~${Math.round(sourceContent.length / 4)} tokens)\n`);
 
 // ─── API calls ───────────────────────────────────────────────────────────────
+async function parseApiResponse(resp, provider) {
+  if (!resp.ok) {
+    const body = await resp.text();
+    const isHtml = body.trimStart().startsWith('<');
+    const detail = isHtml ? `(HTTP ${resp.status} — got HTML instead of JSON, check API key / endpoint)` : body;
+    throw new Error(`${provider} API error ${resp.status}: ${detail}`);
+  }
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const body = await resp.text();
+    throw new Error(`${provider} API returned unexpected content-type "${ct}": ${body.substring(0, 200)}`);
+  }
+  return resp.json();
+}
+
 async function callAnthropic(system, userContent, maxTokens = 16384) {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -89,7 +104,7 @@ async function callAnthropic(system, userContent, maxTokens = 16384) {
       messages: [{ role: 'user', content: userContent }]
     })
   });
-  const data = await resp.json();
+  const data = await parseApiResponse(resp, 'Anthropic');
   if (data.error) throw new Error(`Anthropic API error: ${JSON.stringify(data.error)}`);
   return { text: data.content[0].text, usage: data.usage };
 }
@@ -110,12 +125,36 @@ async function callOpenAI(system, userContent, maxTokens = 16384) {
       ]
     })
   });
-  const data = await resp.json();
+  const data = await parseApiResponse(resp, 'OpenAI');
   if (data.error) throw new Error(`OpenAI API error: ${JSON.stringify(data.error)}`);
   return { text: data.choices[0].message.content, usage: data.usage };
 }
 
-const callLLM = provider === 'openai' ? callOpenAI : callAnthropic;
+async function callGemini(system, userContent, maxTokens = 16384) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      generationConfig: { maxOutputTokens: maxTokens }
+    })
+  });
+  const data = await parseApiResponse(resp, 'Gemini');
+  if (data.error) throw new Error(`Gemini API error: ${JSON.stringify(data.error)}`);
+  const text = data.candidates[0].content.parts.map(p => p.text).join('');
+  const usage = {
+    input_tokens: data.usageMetadata?.promptTokenCount ?? 0,
+    output_tokens: data.usageMetadata?.candidatesTokenCount ?? 0
+  };
+  return { text, usage };
+}
+
+const PROVIDER_FNS = { openai: callOpenAI, anthropic: callAnthropic, gemini: callGemini };
+const callLLM = PROVIDER_FNS[provider] || callAnthropic;
 const tracker = new CostTracker();
 
 // ─── Pass 1: Batch extraction (if large source) ─────────────────────────────
@@ -151,7 +190,8 @@ Be thorough. Preserve specific quotes, numbers, and named concepts. This extract
     console.log(`  Extracting chunk ${i + 1}/${chunks.length}...`);
     const result = await callLLM(EXTRACTION_SYSTEM, chunks[i], 8000);
     const u = normalizeUsage(result.usage);
-    tracker.add(model, u.input, u.output, `pass1-chunk${i + 1}`);
+    const c = tracker.add(model, u.input, u.output, `pass1-chunk${i + 1}`);
+    logCost({ model, provider, inputTokens: u.input, outputTokens: u.output, cost: c, action: 'synthesize', persona: args.name || '' });
     console.log(`  Done: ${tracker.formatEntry(model, u.input, u.output)}`);
     extractions.push(result.text);
   }
@@ -203,7 +243,8 @@ Be extremely specific. Use their actual language and frameworks. This document w
 
 const pass2 = await callLLM(PERSONA_SYSTEM, extractedContent, 12000);
 const pass2Usage = normalizeUsage(pass2.usage);
-tracker.add(model, pass2Usage.input, pass2Usage.output, 'pass2-synthesis');
+const pass2Cost = tracker.add(model, pass2Usage.input, pass2Usage.output, 'pass2-synthesis');
+logCost({ model, provider, inputTokens: pass2Usage.input, outputTokens: pass2Usage.output, cost: pass2Cost, action: 'synthesize', persona: args.name || '' });
 console.log(`Pass 2 done: ${tracker.formatEntry(model, pass2Usage.input, pass2Usage.output)}`);
 
 // ─── Save output ─────────────────────────────────────────────────────────────

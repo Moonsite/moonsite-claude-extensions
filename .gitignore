@@ -6,4 +6,5 @@
 .claude/jira-autopilot.local.json
 .claude/jira-tracker.declined
 .claude/jira-autopilot.declined
+.claude/persona-panel-costs.jsonl
 __pycache__/

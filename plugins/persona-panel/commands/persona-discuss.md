@@ -38,13 +38,24 @@ If it exists, read it and tell the user:
 
 ## Step 3: Load Personas
 
-Load personas from both directories:
+Load personas from all three directories:
 - **Bundled:** `${CLAUDE_PLUGIN_ROOT}/personas/` — read each subdirectory's `config.json` and `persona.md`
-- **Project:** `${CLAUDE_PROJECT_DIR}/.persona-panel/personas/` — same structure
+- **Global:** `$HOME/.claude/persona-panel/personas/` — read each subdirectory's `config.json` and `persona.md` (skip if directory doesn't exist)
+- **Project:** `${CLAUDE_PROJECT_DIR}/.persona-panel/personas/` — same structure (skip if directory doesn't exist)
+
+**Deduplicate by shortName.** If a persona appears in multiple tiers, the highest-priority tier wins: project > global > bundled.
 
 If `--with` is specified, filter to only those personas (match on `shortName` or `name`, case-insensitive). Verify all requested personas exist.
 
 If `--moderator` is specified, identify the moderator persona from the loaded set. The moderator participates AND moderates.
+
+### Load Context for Each Persona
+
+For each loaded persona, load context notes from both locations:
+- `$HOME/.claude/persona-panel/context/<shortName>.json` (global context)
+- `${CLAUDE_PROJECT_DIR}/.persona-panel/context/<shortName>.json` (project context)
+
+Each file is a JSON array of `{ "id", "text", "added" }` objects. If a file doesn't exist, treat as empty array. Combine both arrays into one list per persona.
 
 ## Step 4: Moderator Setup (if --moderator specified)
 
@@ -72,7 +83,7 @@ Update `--rounds` based on duration choice (use the max of the range).
 {
   "version": 1,
   "round": 0,
-  "maxRounds": <from args>,
+  "maxRounds": "<from args>",
   "topic": "<parsed topic>",
   "startTime": "<current ISO timestamp>",
   "personas": ["<shortName1>", "<shortName2>"],
@@ -136,7 +147,7 @@ For each persona turn:
   "provider": "<from persona config>",
   "model": "<from persona config>",
   "system": "<built system prompt>",
-  "messages": <messages array from persona's history>,
+  "messages": "<messages array from persona's history>",
   "maxTokens": 4096
 }
 ```
@@ -167,6 +178,10 @@ You ARE {persona.name}. Your worldview, practices, and opinions are described be
 PERSONA DOCUMENT:
 {contents of persona.md}
 
+CONTEXT UPDATES:
+- {text} (added {added date})
+- {text} (added {added date})
+
 ────────────────────────────────────────────────────────────
 
 You are participating in a panel discussion with other experts. Speak in first person as {persona.name}. Use your actual frameworks, language, and perspective. Be direct and specific.
@@ -175,6 +190,8 @@ CRITICAL — Response length: Match your response length to what the conversatio
 
 You can reference what other participants said, agree, disagree, or build on their points. Don't repeat what's already been said.
 ```
+
+**CONTEXT UPDATES section:** Only include this section if the persona has context entries. List each entry as `- {text} (added {added date})`. Place it between the persona document and the separator line.
 
 If `state.fileContext` is non-empty, append:
 ```
