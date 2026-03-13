@@ -18,6 +18,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+PLUGIN_VERSION = '2.4.0'
+
+# Default font families
+DEFAULT_FONT_LATIN = 'Inter'
+DEFAULT_FONT_HEBREW = 'Heebo'
+
 # ─── Diagram support ─────────────────────────────────────────────────────────
 
 DIAGRAM_LANGUAGES = {
@@ -793,15 +799,15 @@ UNIFIED_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Heebo:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&family=Assistant:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="{{FONT_LINK}}" rel="stylesheet">
 <link rel="stylesheet" id="hljs-dark" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
 <link rel="stylesheet" id="hljs-light" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css" disabled>
 <style>
 :root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#1E1E1E;--code-text:#d4d4d4;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
 [dir="rtl"]{--code-bg:#f5f5f5;--code-text:#1a1a2e}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
-[dir="rtl"] body{font-family:'Heebo','Rubik','Assistant',system-ui,sans-serif;line-height:1.8}
+body{font-family:'{{FONT_LATIN}}',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+[dir="rtl"] body{font-family:'{{FONT_HEBREW}}',system-ui,sans-serif;line-height:1.8}
 
 /* ── Header ── */
 .site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -979,7 +985,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <script type="text/plain" id="md-source">{{MD_SOURCE}}</script>
 <div class="footer">
   <span>{{FOOTER_TEXT}}</span>
-  <span>Generated: {{GENERATION_DATE}}</span>
+  <span>Last Updated {{GENERATION_DATE}} by md-to-html plugin v{{PLUGIN_VERSION}}</span>
 </div>
 </main>
 </div>
@@ -988,6 +994,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 <script>hljs.highlightAll();</script>
 <script>
 /* ── Direction toggle ── */
+var docDirKey='doc-dir:'+location.pathname;
 function toggleDir(){
   var html=document.documentElement;
   var newDir=html.dir==='rtl'?'ltr':'rtl';
@@ -999,10 +1006,10 @@ function toggleDir(){
   document.getElementById('hljs-dark').disabled=(newDir==='rtl');
   document.getElementById('hljs-light').disabled=(newDir!=='rtl');
   document.getElementById('btn-dir').textContent=newDir==='rtl'?'LTR':'RTL';
-  try{localStorage.setItem('doc-dir',newDir)}catch(e){}
+  try{localStorage.setItem(docDirKey,newDir)}catch(e){}
 }
 (function(){
-  var saved=localStorage.getItem('doc-dir');
+  var saved=localStorage.getItem(docDirKey);
   if(saved&&saved!==document.documentElement.dir){
     document.documentElement.dir=saved;
     document.documentElement.lang=saved==='rtl'?'he':'en';
@@ -1082,10 +1089,10 @@ INDEX_TEMPLATE = """\
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="{{FONT_LINK}}" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh}
+body{font-family:'{{FONT_LATIN}}',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh}
 .header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:2.5rem 2rem 2rem;position:relative;overflow:hidden}
 .header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(to bottom right,transparent 49.5%,#f8f9fb 50%)}
 .header-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:1.25rem;position:relative;z-index:1}
@@ -1133,7 +1140,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 {{CONTENT}}
 </div>
 </div>
-<div class="footer">{{FOOTER_TEXT}} &mdash; {{GENERATION_DATE}}</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; Last Updated {{GENERATION_DATE}} by md-to-html plugin v{{PLUGIN_VERSION}}</div>
 </body>
 </html>
 """
@@ -1149,10 +1156,10 @@ INDEX_RTL_TEMPLATE = """\
 <title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="{{FONT_LINK}}" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh;direction:rtl}
+body{font-family:'{{FONT_HEBREW}}',system-ui,sans-serif;background:#f8f9fb;color:#1a1a2e;min-height:100vh;direction:rtl}
 .header{background:linear-gradient(135deg,{{HEADER_FROM}} 0%,{{HEADER_TO}} 100%);color:#fff;padding:2.5rem 2rem 2rem;position:relative;overflow:hidden}
 .header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(to bottom left,transparent 49.5%,#f8f9fb 50%)}
 .header-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:1.25rem;position:relative;z-index:1}
@@ -1200,7 +1207,7 @@ body{font-family:'Heebo','Rubik',system-ui,sans-serif;background:#f8f9fb;color:#
 {{CONTENT}}
 </div>
 </div>
-<div class="footer">{{FOOTER_TEXT}} &mdash; {{GENERATION_DATE}}</div>
+<div class="footer">{{FOOTER_TEXT}} &mdash; Last Updated {{GENERATION_DATE}} by md-to-html plugin v{{PLUGIN_VERSION}}</div>
 </body>
 </html>
 """
@@ -1213,6 +1220,47 @@ def is_hebrew(text: str) -> bool:
     hebrew = sum(1 for c in text if '\u0590' <= c <= '\u05FF')
     alpha = sum(1 for c in text if c.isalpha())
     return alpha > 0 and (hebrew / alpha) > 0.05
+
+
+def detect_rtl(text: str) -> bool:
+    """Return True if any of the first 10 non-empty text lines starts with Hebrew.
+
+    Skips YAML frontmatter and strips markdown heading markers before checking.
+    Used for document direction; is_hebrew() is still used for language badges.
+    """
+    # Strip frontmatter
+    body = text
+    if text.startswith('---'):
+        end = text.find('---', 3)
+        if end != -1:
+            body = text[end + 3:]
+    lines = [l.strip() for l in body.split('\n') if l.strip()]
+    count = 0
+    for line in lines:
+        if count >= 10:
+            break
+        # Strip markdown heading markers
+        clean = re.sub(r'^#+\s*', '', line)
+        if not clean:
+            continue
+        # Find first alphabetic character in this line
+        for ch in clean:
+            if ch.isalpha():
+                if '\u0590' <= ch <= '\u05FF':
+                    return True
+                break
+        count += 1
+    return False
+
+
+def build_font_link(fonts, code_font='JetBrains Mono'):
+    """Build Google Fonts CSS2 URL for given font family names."""
+    def param(name, weights='400;500;600;700'):
+        return f"family={name.replace(' ', '+')}:wght@{weights}"
+    parts = [param(f) for f in fonts]
+    if code_font:
+        parts.append(param(code_font, '400;500'))
+    return f"https://fonts.googleapis.com/css2?{'&'.join(parts)}&display=swap"
 
 
 # ─── Markdown → HTML ──────────────────────────────────────────────────────────
@@ -1589,10 +1637,16 @@ def convert_file(md_path: str) -> str:
     toc_html = build_toc(headings)
     gen_date = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-    is_rtl = is_hebrew(md_text)
+    is_rtl = detect_rtl(md_text)
     template = UNIFIED_TEMPLATE
 
     config = load_config(md_path.parent, title=title)
+
+    # Font configuration from project config
+    fonts_cfg = config.get('fonts', {})
+    font_latin = fonts_cfg.get('latin', DEFAULT_FONT_LATIN)
+    font_hebrew = fonts_cfg.get('hebrew', DEFAULT_FONT_HEBREW)
+    font_link = build_font_link([font_latin, font_hebrew])
 
     # Conditional badge/org HTML
     badge_text = config.get('badgeText', '')
@@ -1606,6 +1660,10 @@ def convert_file(md_path: str) -> str:
              .replace('{{CONTENT}}', content_html)
              .replace('{{MD_SOURCE}}', html.escape(body_without_fm))
              .replace('{{GENERATION_DATE}}', gen_date)
+             .replace('{{PLUGIN_VERSION}}', PLUGIN_VERSION)
+             .replace('{{FONT_LINK}}', font_link)
+             .replace('{{FONT_LATIN}}', font_latin)
+             .replace('{{FONT_HEBREW}}', font_hebrew)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
              .replace('{{ORG_NAME}}', html.escape(org_name) if org_name else '')
              .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
@@ -1773,15 +1831,26 @@ def generate_index(folder: str) -> str:
     header_from = config.get('headerFrom', '#1e3a5f')
     header_to = config.get('headerTo', '#2563eb')
 
+    # Font configuration from project config
+    fonts_cfg = config.get('fonts', {})
+    font_latin = fonts_cfg.get('latin', DEFAULT_FONT_LATIN)
+    font_hebrew = fonts_cfg.get('hebrew', DEFAULT_FONT_HEBREW)
+
     # Pick RTL template if majority of docs are Hebrew
     use_rtl = total_count > 0 and hebrew_count > total_count / 2
     template = INDEX_RTL_TEMPLATE if use_rtl else INDEX_TEMPLATE
+    idx_font = font_hebrew if use_rtl else font_latin
+    font_link = build_font_link([idx_font])
 
     final = (template
              .replace('{{TITLE}}', html.escape(folder_name))
              .replace('{{SUBTITLE}}', f'{total_count} item{"s" if total_count != 1 else ""}')
              .replace('{{CONTENT}}', cards_html)
              .replace('{{GENERATION_DATE}}', gen_date)
+             .replace('{{PLUGIN_VERSION}}', PLUGIN_VERSION)
+             .replace('{{FONT_LINK}}', font_link)
+             .replace('{{FONT_LATIN}}', font_latin)
+             .replace('{{FONT_HEBREW}}', font_hebrew)
              .replace('{{PROJECT_NAME}}', html.escape(config['projectName']))
              .replace('{{LOGO_TEXT}}', html.escape(config['logoText']))
              .replace('{{ORG_HTML}}', org_html)
