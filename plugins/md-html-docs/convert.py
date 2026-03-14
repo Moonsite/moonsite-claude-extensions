@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-PLUGIN_VERSION = '2.5.1'
+PLUGIN_VERSION = '2.5.2'
 
 # Default font families
 DEFAULT_FONT_LATIN = 'Inter'

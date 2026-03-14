@@ -1,7 +1,7 @@
 ---
 name: md-html-docs
 description: Use PROACTIVELY whenever a markdown (.md) file is created or updated anywhere in the project. Automatically generates styled HTML with language-appropriate templates (RTL for Hebrew, LTR for English). Also use when the user asks to convert markdown to HTML, generate documentation, or create HTML from .md files.
-version: 2.5.1
+version: 2.5.2
 released: 2026-03-12
 ---
 
@@ -28,6 +28,22 @@ The plugin includes a self-contained Python converter (`convert.py`) with zero d
 5. Generates sidebar TOC from h2/h3 headings
 6. Generates `index.html` for folders listing documents and subfolders
 
+## Locating convert.py
+
+**CRITICAL**: Always derive the converter path from this skill's base directory. The converter lives at `../../convert.py` relative to this SKILL.md file.
+
+```
+CONVERTER="${SKILL_BASE_DIR}/../../convert.py"
+```
+
+Where `SKILL_BASE_DIR` is the "Base directory for this skill" shown at the top when this skill is loaded. For example, if the base directory is:
+`~/.claude/plugins/cache/moonsite-claude-extensions/md-html-docs/2.5.1/skills/md-html-docs`
+
+Then the converter path is:
+`~/.claude/plugins/cache/moonsite-claude-extensions/md-html-docs/2.5.1/convert.py`
+
+**NEVER hardcode a version number in the path.** Always resolve from the skill's own base directory to ensure you use the currently installed version.
+
 ## Workflow
 
 ### When a .md file is created or edited:
@@ -38,14 +54,13 @@ The plugin includes a self-contained Python converter (`convert.py`) with zero d
 
 ### For manual conversion:
 
-Use `/md-html-docs-convert` with a path:
+Run the converter directly using the resolved path:
 
 ```bash
-/md-html-docs-convert path/to/file.md          # single file
-/md-html-docs-convert path/to/folder/           # folder (non-recursive)
-/md-html-docs-convert 'docs/**/*.md'            # glob pattern
-/md-html-docs-convert --all docs/               # recursive + all indexes
-/md-html-docs-convert --index docs/guides/      # regenerate index only
+python3 "$CONVERTER" path/to/file.md            # single file
+python3 "$CONVERTER" path/to/folder/             # folder (non-recursive)
+python3 "$CONVERTER" --all docs/                 # recursive + all indexes
+python3 "$CONVERTER" --index docs/guides/        # regenerate index only
 ```
 
 ### Enable/disable auto-generation:

@@ -4,6 +4,10 @@ All notable changes to **md-html-docs** are documented here.
 
 ---
 
+## [2.5.2] — 2026-03-15
+
+- Add explicit convert.py path resolution instructions to SKILL.md to prevent Claude from using stale cached versions
+
 ## [2.5.1] — 2026-03-14
 
 - Fix TOC sidebar showing raw markdown formatting (`**`, `_`, etc.) instead of clean text

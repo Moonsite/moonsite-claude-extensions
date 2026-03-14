@@ -6,6 +6,11 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.3.6] — 2026-03-15
+
+### md-html-docs 2.5.2
+- Add explicit convert.py path resolution to SKILL.md to prevent stale cache usage
+
 ## [1.3.5] — 2026-03-14
 
 ### md-html-docs 2.5.1
