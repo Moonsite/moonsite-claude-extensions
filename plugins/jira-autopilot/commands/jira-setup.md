@@ -245,7 +245,43 @@ If `.claude/jira-autopilot.declined` exists, delete it:
 rm -f "$PROJECT_ROOT/.claude/jira-autopilot.declined"
 ```
 
-## Step 14: Confirm Setup
+## Step 14: Configure statusLine (Optional)
+
+Ask the user: "Enable Jira status in the Claude Code status bar? This shows git info, active Jira issue, timer, context usage, and cost in the bottom bar."
+
+If yes:
+
+1. Read the current `~/.claude/settings.json` (or `{}` if it doesn't exist).
+2. Set the `statusLine` key to use dynamic path resolution that auto-picks the latest plugin version:
+
+```bash
+python3 -c "
+import json, os
+
+settings_path = os.path.expanduser('~/.claude/settings.json')
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    settings = {}
+
+settings['statusLine'] = {
+    'type': 'command',
+    'command': 'bash -c \'exec bash \"\$(ls -d ~/.claude/plugins/cache/moonsite-claude-extensions/jira-autopilot/*/hooks-handlers/statusline-command.sh 2>/dev/null | sort -V | tail -1)\"\''
+}
+
+os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+with open(settings_path, 'w') as f:
+    json.dump(settings, f, indent=2)
+print('statusLine configured in ~/.claude/settings.json')
+"
+```
+
+3. Tell the user: "Status bar configured. It will appear on your next Claude Code session."
+
+If no, skip to the next step.
+
+## Step 15: Confirm Setup
 
 Display a summary of the saved configuration:
 
@@ -257,6 +293,7 @@ Jira Autopilot configured:
   Accuracy:  {accuracy}
   Language:  {logLanguage}
   Debug:     {debugLog}
+  StatusLine: {enabled/disabled}
 
 Run /start-work to begin tracking a Jira task.
 ```
