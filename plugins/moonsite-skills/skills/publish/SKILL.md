@@ -1,7 +1,7 @@
 ---
 name: publish
 description: "Publish all changed plugins/skills — bump versions, update marketplace.json, commit, push, and install locally. Use when the user says 'publish', 'release all', 'publish marketplace', or similar."
-version: 1.0.3
+version: 1.0.4
 ---
 
 # Publish Marketplace
@@ -79,10 +79,28 @@ For each changed plugin, update every detected version file using the Edit tool:
 
 Also bump the **top-level marketplace version** in `.claude-plugin/marketplace.json` → `metadata.version`. Use patch bump for this.
 
+## Step 5.5: Update Changelogs
+
+For each changed plugin, update both the top-level and per-plugin changelogs:
+
+1. **Determine changes**: Run `git log --oneline` since the last version tag/release commit for each plugin. Focus on non-bump commits. If no meaningful commits found, summarize from the staged diff.
+
+2. **Update per-plugin changelog** (`plugins/<name>/CHANGELOG.md`):
+   - Prepend a new entry after the `---` separator
+   - Format: `## [X.Y.Z] — YYYY-MM-DD` followed by bullet points
+   - If the file doesn't exist, create it with the header template
+
+3. **Update top-level changelog** (`CHANGELOG.md`):
+   - Prepend a new marketplace version entry after `---`
+   - Format: `## [marketplace-ver] — YYYY-MM-DD` with `### plugin-name X.Y.Z` subsections
+   - If the file doesn't exist, create it with the header template
+
+4. Stage both changelog files alongside the version files in Step 6.
+
 ## Step 6: Commit and Push
 
 1. Run `git diff --stat` to review all changes
-2. Stage only the version-bumped files by name (never `git add -A`)
+2. Stage only the version-bumped files, `CHANGELOG.md`, and `plugins/<name>/CHANGELOG.md` by name (never `git add -A`)
 3. Commit with message: `Publish: bump <plugin1> to vX.Y.Z, <plugin2> to vX.Y.Z`
    - If only one plugin changed: `Publish: bump <plugin> to vX.Y.Z`
 4. Push to the current branch

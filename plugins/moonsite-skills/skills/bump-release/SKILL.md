@@ -1,7 +1,7 @@
 ---
 name: bump-release
 description: "Bump version across all project files, commit, push, and create PR. Use when the user says 'bump version', 'release', 'bump-release', 'cut a release', 'version bump', or similar."
-version: 1.0.3
+version: 1.0.4
 ---
 
 # Bump Release
@@ -80,10 +80,12 @@ To determine what changed: check `git log` since the last version tag or release
 
 If `CHANGELOG.md` does not exist, skip this step.
 
+Also update any `plugins/<name>/CHANGELOG.md` files if they exist. Use the same format and change detection logic. If a per-plugin changelog doesn't exist, skip it (don't create during bump-release — only `/publish` creates initial changelogs).
+
 ### Step 6: Commit and Push
 
 1. Run `git status` and `git diff` to review changes
-2. Stage only the version-bumped files **and** `CHANGELOG.md` (by name, not `git add -A`)
+2. Stage only the version-bumped files, `CHANGELOG.md`, and any `plugins/<name>/CHANGELOG.md` files (by name, not `git add -A`)
 3. Commit with message: `Bump version to X.Y.Z`
 4. Push to the current remote branch
 

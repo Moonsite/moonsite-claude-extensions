@@ -1,6 +1,6 @@
 {
   "name": "moonsite-skills",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Moonsite utility skills — version bumping, spec generation",
   "author": { "name": "Boris Sigalov" }
 }

@@ -1,6 +1,6 @@
 {
   "name": "persona-panel",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "AI persona panel — synthesize expert personas from sources and have them review documents, code, and ideas. Includes live multi-persona discussions with moderator support.",
   "author": {
     "name": "Boris Sigalov"

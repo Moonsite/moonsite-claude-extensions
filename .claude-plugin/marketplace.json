@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Moonsite extensions for Claude Code \u2014 plugins, skills, and hooks",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "homepage": "https://github.com/Moonsite/moonsite-claude-extensions"
   },
   "plugins": [
@@ -14,7 +14,7 @@
       "name": "jira-autopilot",
       "source": "./plugins/jira-autopilot",
       "description": "Autonomous Jira work tracking, issue creation, and time logging for Claude Code sessions",
-      "version": "4.1.0",
+      "version": "4.1.1",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -34,7 +34,7 @@
       "name": "md-html-docs",
       "source": "./plugins/md-html-docs",
       "description": "General-purpose markdown-to-HTML converter with auto language detection (RTL/LTR), TOC generation, and folder indexes",
-      "version": "2.4.0",
+      "version": "2.5.0",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -55,7 +55,7 @@
       "name": "moonsite-skills",
       "source": "./plugins/moonsite-skills",
       "description": "Moonsite utility skills — version bumping, spec generation, marketplace publishing",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "author": {
         "name": "Boris Sigalov"
       },
@@ -74,7 +74,7 @@
       "name": "persona-panel",
       "source": "./plugins/persona-panel",
       "description": "AI persona panel — synthesize expert personas, have them review documents/code/ideas, and run live multi-persona discussions with moderator support",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "author": {
         "name": "Boris Sigalov"
       },

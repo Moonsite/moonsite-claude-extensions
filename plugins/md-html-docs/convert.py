@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-PLUGIN_VERSION = '2.4.0'
+PLUGIN_VERSION = '2.5.0'
 
 # Default font families
 DEFAULT_FONT_LATIN = 'Inter'
@@ -740,6 +740,453 @@ NOTES_JS = r"""
 </script>
 """
 
+# ─── Settings Panel ──────────────────────────────────────────────────────────
+
+SETTINGS_PANEL_CSS = """/* ── Settings Panel ── */
+.settings-gear{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:.3rem .55rem;font-size:.8rem;cursor:pointer;color:rgba(255,255,255,.9);transition:all .15s;line-height:1}
+.settings-gear:hover{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.3)}
+.settings-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;opacity:0;pointer-events:none;transition:opacity .2s ease-out}
+.settings-overlay.open{opacity:1;pointer-events:auto}
+.settings-panel{position:fixed;top:0;bottom:0;width:320px;z-index:301;background:var(--surface);border-left:1px solid var(--border);box-shadow:-4px 0 24px rgba(0,0,0,.12);display:flex;flex-direction:column;transition:transform .2s ease-out}
+[dir="ltr"] .settings-panel,.settings-panel{right:0;transform:translateX(100%)}
+[dir="rtl"] .settings-panel{right:auto;left:0;border-left:none;border-right:1px solid var(--border);box-shadow:4px 0 24px rgba(0,0,0,.12);transform:translateX(-100%)}
+.settings-panel.open{transform:translateX(0)}
+.settings-panel-hdr{padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.settings-panel-hdr h3{font-size:.95rem;font-weight:600;margin:0;color:var(--text)}
+.settings-panel-close{background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--muted);padding:.2rem;line-height:1}
+.settings-panel-close:hover{color:var(--text)}
+.settings-tabs{display:flex;border-bottom:1px solid var(--border);padding:0 .5rem;gap:0}
+.settings-tabs button{flex:1;padding:.5rem .25rem;border:none;background:none;cursor:pointer;font-size:.72rem;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.settings-tabs button:hover{color:var(--text);background:var(--accent-light)}
+.settings-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.settings-tab-content{flex:1;overflow-y:auto;padding:.75rem 1rem}
+.settings-tab-pane{display:none}
+.settings-tab-pane.active{display:block}
+.settings-group{margin-bottom:1rem}
+.settings-group label{display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.35rem}
+.settings-group select,.settings-group input[type="range"]{width:100%;padding:.35rem .5rem;border:1px solid var(--border);border-radius:6px;font-size:.82rem;background:var(--bg);color:var(--text);font-family:inherit}
+.settings-group select:focus,.settings-group input[type="range"]:focus{outline:none;border-color:var(--accent)}
+.settings-group input[type="range"]{padding:.2rem 0;border:none;background:none}
+.settings-range-val{font-size:.72rem;color:var(--muted);float:right;font-variant-numeric:tabular-nums}
+.settings-seg{display:flex;gap:1px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.settings-seg button{flex:1;padding:.35rem .25rem;border:none;background:var(--bg);cursor:pointer;font-size:.75rem;font-weight:500;color:var(--muted);transition:all .15s}
+.settings-seg button:hover{background:var(--accent-light);color:var(--text)}
+.settings-seg button.active{background:var(--accent);color:#fff;font-weight:600}
+.settings-swatches{display:flex;gap:.4rem;flex-wrap:wrap}
+.settings-swatch{width:28px;height:28px;border-radius:6px;border:2px solid var(--border);cursor:pointer;transition:all .15s;position:relative}
+.settings-swatch:hover{transform:scale(1.15)}
+.settings-swatch.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-light)}
+.settings-swatch.active::after{content:'\2713';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.7rem;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.settings-footer{padding:.6rem 1rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:space-between}
+.settings-footer button{padding:.35rem .6rem;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:.72rem;font-weight:500;font-family:inherit;background:var(--bg);color:var(--text);transition:all .15s}
+.settings-footer button:hover{border-color:var(--accent);color:var(--accent)}
+.settings-footer .settings-reset{color:#dc2626;border-color:#dc2626}
+.settings-footer .settings-reset:hover{background:#fef2f2}
+body.settings-open{overflow:hidden}
+/* ── Dark mode overrides ── */
+[data-mode="dark"]{--bg:#111827;--surface:#1f2937;--text:#f3f4f6;--muted:#9ca3af;--border:#374151;--code-bg:#0d1117;--code-text:#e6edf3}
+[data-mode="dark"] .site-header{background:linear-gradient(135deg,#0f172a,#1e3a5f)}
+[data-mode="dark"] p code,[data-mode="dark"] li code{background:#374151;color:#f87171}
+[data-mode="dark"] th{background:#374151;color:#f3f4f6}
+[data-mode="dark"] tr:nth-child(even){background:#1f2937}
+[data-mode="dark"] blockquote{background:#1e293b;border-left-color:var(--accent)}
+[data-mode="dark"] .warning-box{background:#422006;border-left-color:#f59e0b}
+[data-mode="dark"] .sidebar{background:#1f2937}
+[data-mode="dark"] .sidebar-card{background:#111827}
+[data-mode="dark"] .settings-panel{background:#1f2937}
+[data-mode="dark"] .notes-panel{background:#1f2937}
+[data-mode="dark"] .note-editor{background:#422006;border-color:#f59e0b}
+[data-mode="dark"] .note-editor textarea{background:#1f2937;color:#f3f4f6;border-color:#374151}
+[data-mode="dark"][dir="rtl"] blockquote{border-right-color:var(--accent)}
+[data-mode="dark"][dir="rtl"] .warning-box{border-right-color:#f59e0b}
+@media print{.settings-gear,.settings-overlay,.settings-panel{display:none!important}}
+@media(max-width:768px){
+  .settings-panel{width:100%;top:auto;bottom:0;max-height:80vh;border-left:none;border-top:1px solid var(--border);border-radius:16px 16px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.15)}
+  [dir="ltr"] .settings-panel,.settings-panel{right:0;transform:translateY(100%)}
+  [dir="rtl"] .settings-panel{left:0;right:auto;transform:translateY(100%);border-right:none;border-top:1px solid var(--border)}
+  .settings-panel.open{transform:translateY(0)}
+}
+"""
+
+SETTINGS_GEAR_HTML = """<button class="settings-gear" onclick="openSettings()" title="Document Settings">&#9881;</button>"""
+
+SETTINGS_BODY_HTML = """<div class="settings-overlay" id="settings-overlay"></div>
+<div class="settings-panel" id="settings-panel">
+  <div class="settings-panel-hdr">
+    <h3>Document Settings</h3>
+    <button class="settings-panel-close" onclick="closeSettings()">&times;</button>
+  </div>
+  <div class="settings-tabs" id="settings-tabs">
+    <button class="active" data-tab="typography">Typography</button>
+    <button data-tab="density">Density</button>
+    <button data-tab="colors">Colors</button>
+    <button data-tab="more">More</button>
+  </div>
+  <div class="settings-tab-content">
+    <div class="settings-tab-pane active" id="tab-typography">
+      <div class="settings-group">
+        <label>Font Preset</label>
+        <select id="set-font-preset">
+          <option value="inter-heebo">Inter + Heebo</option>
+          <option value="noto-clean">Noto Sans</option>
+          <option value="ibm-technical">IBM Plex</option>
+          <option value="serif-editorial">Serif Editorial</option>
+          <option value="monospace">Monospace</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="settings-group">
+        <label>Base Font Size <span class="settings-range-val" id="set-size-val">14px</span></label>
+        <input type="range" id="set-font-size" min="12" max="20" step="1" value="14">
+      </div>
+      <div class="settings-group">
+        <label>Line Height <span class="settings-range-val" id="set-lh-val">1.4</span></label>
+        <input type="range" id="set-line-height" min="1.2" max="2.0" step="0.1" value="1.4">
+      </div>
+    </div>
+    <div class="settings-tab-pane" id="tab-density">
+      <div class="settings-group">
+        <label>Density Preset</label>
+        <div class="settings-seg" id="set-density">
+          <button data-val="compact">Compact</button>
+          <button data-val="comfortable" class="active">Comfortable</button>
+          <button data-val="spacious">Spacious</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Paragraph Spacing <span class="settings-range-val" id="set-ps-val">0.45rem</span></label>
+        <input type="range" id="set-p-spacing" min="0.2" max="1.2" step="0.05" value="0.45">
+      </div>
+      <div class="settings-group">
+        <label>Heading Top Margin <span class="settings-range-val" id="set-ht-val">2.5rem</span></label>
+        <input type="range" id="set-h-top" min="1.0" max="4.0" step="0.25" value="2.5">
+      </div>
+      <div class="settings-group">
+        <label>Content Max Width <span class="settings-range-val" id="set-mw-val">860px</span></label>
+        <input type="range" id="set-max-width" min="600" max="1200" step="10" value="860">
+      </div>
+    </div>
+    <div class="settings-tab-pane" id="tab-colors">
+      <div class="settings-group">
+        <label>Color Mode</label>
+        <div class="settings-seg" id="set-color-mode">
+          <button data-val="light" class="active">Light</button>
+          <button data-val="dark">Dark</button>
+          <button data-val="auto">Auto</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Accent Color</label>
+        <div class="settings-swatches" id="set-accent">
+          <div class="settings-swatch active" data-color="#2563eb" style="background:#2563eb" title="Blue"></div>
+          <div class="settings-swatch" data-color="#16a34a" style="background:#16a34a" title="Green"></div>
+          <div class="settings-swatch" data-color="#7c3aed" style="background:#7c3aed" title="Purple"></div>
+          <div class="settings-swatch" data-color="#ea580c" style="background:#ea580c" title="Orange"></div>
+          <div class="settings-swatch" data-color="#dc2626" style="background:#dc2626" title="Red"></div>
+          <div class="settings-swatch" data-color="#0891b2" style="background:#0891b2" title="Teal"></div>
+        </div>
+      </div>
+    </div>
+    <div class="settings-tab-pane" id="tab-more">
+      <div class="settings-group">
+        <label>Direction</label>
+        <div class="settings-seg" id="set-direction">
+          <button data-val="ltr" class="active">LTR</button>
+          <button data-val="rtl">RTL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="settings-footer">
+    <button class="settings-reset" onclick="resetSettings()">Reset to Defaults</button>
+    <button onclick="saveAsGlobal()">Set as Global Default</button>
+  </div>
+</div>"""
+
+SETTINGS_PANEL_JS = r"""
+<script>
+(function(){
+  var DOC_KEY='doc-settings:'+location.pathname;
+  var GLOBAL_KEY='doc-settings:global-defaults';
+
+  var FONT_PRESETS={
+    'noto-clean':{heading:'Noto Sans',body:'Noto Sans',code:'Noto Sans Mono'},
+    'ibm-technical':{heading:'IBM Plex Sans',body:'IBM Plex Sans',code:'IBM Plex Mono'},
+    'inter-heebo':{heading:'Inter',body:'Heebo',code:'JetBrains Mono'},
+    'serif-editorial':{heading:'Playfair Display',body:'Source Serif 4',code:'Source Code Pro'},
+    'monospace':{heading:'JetBrains Mono',body:'JetBrains Mono',code:'JetBrains Mono'}
+  };
+
+  var COLOR_MODES={
+    light:{bg:'#f8f9fa',surface:'#fff',text:'#1a1a2e',muted:'#6b7280',border:'#e5e7eb',codeBg:'#1E1E1E',codeText:'#d4d4d4'},
+    dark:{bg:'#111827',surface:'#1f2937',text:'#f3f4f6',muted:'#9ca3af',border:'#374151',codeBg:'#0d1117',codeText:'#e6edf3'}
+  };
+
+  var DENSITY_PRESETS={
+    compact:{pSpacing:'0.3rem',hTop:'1.5rem',hBottom:'0.2rem',maxWidth:'750px'},
+    comfortable:{pSpacing:'0.45rem',hTop:'2.5rem',hBottom:'0.4rem',maxWidth:'860px'},
+    spacious:{pSpacing:'0.8rem',hTop:'3rem',hBottom:'0.6rem',maxWidth:'960px'}
+  };
+
+  var TEMPLATE_DEFAULTS={
+    fontPreset:'inter-heebo',fontSize:14,lineHeight:1.4,
+    pSpacing:0.45,hTop:2.5,hBottom:0.4,maxWidth:860,
+    colorMode:'light',accent:'#2563eb',
+    densityPreset:'comfortable'
+  };
+
+  var loadedFonts={};
+  function loadFont(name){
+    if(!name||loadedFonts[name])return;
+    loadedFonts[name]=true;
+    var link=document.createElement('link');
+    link.rel='stylesheet';
+    link.href='https://fonts.googleapis.com/css2?family='+name.replace(/ /g,'+')+':wght@400;500;600;700&display=swap';
+    document.head.appendChild(link);
+  }
+
+  function applySettings(s){
+    var r=document.documentElement.style;
+    // Fonts
+    var fp=FONT_PRESETS[s.fontPreset];
+    if(fp){
+      loadFont(fp.heading);loadFont(fp.body);loadFont(fp.code);
+      r.setProperty('--body-font',"'"+fp.body+"',sans-serif");
+      r.setProperty('--heading-font',"'"+fp.heading+"',sans-serif");
+      r.setProperty('--code-font',"'"+fp.code+"',monospace");
+    }
+    r.setProperty('--base-size',s.fontSize+'px');
+    r.setProperty('--line-height',String(s.lineHeight));
+    r.setProperty('--p-spacing',s.pSpacing+'rem');
+    r.setProperty('--h-top-margin',s.hTop+'rem');
+    r.setProperty('--h-bottom-margin',s.hBottom+'rem');
+    r.setProperty('--content-max-width',s.maxWidth+'px');
+    // Color mode
+    if(s.colorMode==='dark'){
+      document.documentElement.setAttribute('data-mode','dark');
+    }else if(s.colorMode==='auto'){
+      var prefersDark=window.matchMedia('(prefers-color-scheme:dark)').matches;
+      document.documentElement.setAttribute('data-mode',prefersDark?'dark':'light');
+    }else{
+      document.documentElement.removeAttribute('data-mode');
+    }
+    // Accent
+    if(s.accent){
+      r.setProperty('--accent',s.accent);
+      // Compute a light variant
+      var hex=s.accent.replace('#','');
+      var rr=parseInt(hex.substr(0,2),16),gg=parseInt(hex.substr(2,2),16),bb=parseInt(hex.substr(4,2),16);
+      var light='rgba('+rr+','+gg+','+bb+',0.1)';
+      r.setProperty('--accent-light',light);
+    }
+    // Sync UI controls
+    syncControls(s);
+  }
+
+  function syncControls(s){
+    var el;
+    el=document.getElementById('set-font-preset');if(el)el.value=s.fontPreset||'inter-heebo';
+    el=document.getElementById('set-font-size');if(el){el.value=s.fontSize||14}
+    el=document.getElementById('set-size-val');if(el)el.textContent=(s.fontSize||14)+'px';
+    el=document.getElementById('set-line-height');if(el){el.value=s.lineHeight||1.4}
+    el=document.getElementById('set-lh-val');if(el)el.textContent=String(s.lineHeight||1.4);
+    el=document.getElementById('set-p-spacing');if(el){el.value=s.pSpacing||0.45}
+    el=document.getElementById('set-ps-val');if(el)el.textContent=(s.pSpacing||0.45)+'rem';
+    el=document.getElementById('set-h-top');if(el){el.value=s.hTop||2.5}
+    el=document.getElementById('set-ht-val');if(el)el.textContent=(s.hTop||2.5)+'rem';
+    el=document.getElementById('set-max-width');if(el){el.value=s.maxWidth||860}
+    el=document.getElementById('set-mw-val');if(el)el.textContent=(s.maxWidth||860)+'px';
+    // Segmented buttons
+    syncSeg('set-color-mode',s.colorMode||'light');
+    syncSeg('set-density',s.densityPreset||'comfortable');
+    syncSeg('set-direction',document.documentElement.dir||'ltr');
+    // Accent swatches
+    var swatches=document.querySelectorAll('#set-accent .settings-swatch');
+    swatches.forEach(function(sw){
+      sw.classList.toggle('active',sw.dataset.color===s.accent);
+    });
+  }
+
+  function syncSeg(id,val){
+    var el=document.getElementById(id);if(!el)return;
+    el.querySelectorAll('button').forEach(function(b){
+      b.classList.toggle('active',b.dataset.val===val);
+    });
+  }
+
+  function loadSettings(){
+    var base=Object.assign({},TEMPLATE_DEFAULTS);
+    try{var g=JSON.parse(localStorage.getItem(GLOBAL_KEY));if(g)Object.assign(base,g)}catch(e){}
+    try{var d=JSON.parse(localStorage.getItem(DOC_KEY));if(d)Object.assign(base,d)}catch(e){}
+    return base;
+  }
+
+  function saveSettings(s,scope){
+    try{
+      var key=scope==='global'?GLOBAL_KEY:DOC_KEY;
+      localStorage.setItem(key,JSON.stringify(s));
+    }catch(e){}
+  }
+
+  var saveTimer;
+  function debouncedSave(s){
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(function(){saveSettings(s,'document')},500);
+  }
+
+  var currentSettings=loadSettings();
+
+  // ── Panel open/close ──
+  window.openSettings=function(){
+    document.getElementById('settings-overlay').classList.add('open');
+    document.getElementById('settings-panel').classList.add('open');
+    document.body.classList.add('settings-open');
+    syncControls(currentSettings);
+  };
+  window.closeSettings=function(){
+    document.getElementById('settings-overlay').classList.remove('open');
+    document.getElementById('settings-panel').classList.remove('open');
+    document.body.classList.remove('settings-open');
+  };
+  window.resetSettings=function(){
+    try{localStorage.removeItem(DOC_KEY)}catch(e){}
+    currentSettings=loadSettings();
+    applySettings(currentSettings);
+  };
+  window.saveAsGlobal=function(){
+    saveSettings(currentSettings,'global');
+    var btn=document.querySelector('.settings-footer button:last-child');
+    if(btn){var old=btn.textContent;btn.textContent='Saved!';setTimeout(function(){btn.textContent=old},1200)}
+  };
+
+  // ── Event wiring ──
+  function initSettingsPanel(){
+    // Tabs
+    var tabs=document.getElementById('settings-tabs');
+    if(tabs)tabs.addEventListener('click',function(e){
+      var btn=e.target.closest('button[data-tab]');if(!btn)return;
+      tabs.querySelectorAll('button').forEach(function(b){b.classList.remove('active')});
+      btn.classList.add('active');
+      document.querySelectorAll('.settings-tab-pane').forEach(function(p){p.classList.remove('active')});
+      var pane=document.getElementById('tab-'+btn.dataset.tab);
+      if(pane)pane.classList.add('active');
+    });
+
+    // Overlay click → close
+    var overlay=document.getElementById('settings-overlay');
+    if(overlay)overlay.addEventListener('click',closeSettings);
+    // Escape → close
+    document.addEventListener('keydown',function(e){
+      if(e.key==='Escape'&&document.getElementById('settings-panel').classList.contains('open'))closeSettings();
+    });
+
+    // Font preset
+    var fpEl=document.getElementById('set-font-preset');
+    if(fpEl)fpEl.addEventListener('change',function(){
+      currentSettings.fontPreset=this.value;
+      applySettings(currentSettings);debouncedSave(currentSettings);
+    });
+
+    // Font size slider
+    bindRange('set-font-size','set-size-val','fontSize','px',function(v){return parseInt(v)});
+    // Line height slider
+    bindRange('set-line-height','set-lh-val','lineHeight','',function(v){return parseFloat(v)});
+    // P spacing
+    bindRange('set-p-spacing','set-ps-val','pSpacing','rem',function(v){return parseFloat(v)});
+    // H top margin
+    bindRange('set-h-top','set-ht-val','hTop','rem',function(v){return parseFloat(v)});
+    // Max width
+    bindRange('set-max-width','set-mw-val','maxWidth','px',function(v){return parseInt(v)});
+
+    // Density segmented
+    bindSeg('set-density',function(val){
+      currentSettings.densityPreset=val;
+      var d=DENSITY_PRESETS[val];
+      if(d){
+        currentSettings.pSpacing=parseFloat(d.pSpacing);
+        currentSettings.hTop=parseFloat(d.hTop);
+        currentSettings.hBottom=parseFloat(d.hBottom);
+        currentSettings.maxWidth=parseInt(d.maxWidth);
+      }
+      applySettings(currentSettings);debouncedSave(currentSettings);
+    });
+
+    // Color mode
+    bindSeg('set-color-mode',function(val){
+      currentSettings.colorMode=val;
+      applySettings(currentSettings);debouncedSave(currentSettings);
+    });
+
+    // Direction
+    bindSeg('set-direction',function(val){
+      document.documentElement.dir=val;
+      document.documentElement.lang=val==='rtl'?'he':'en';
+      document.querySelectorAll('[data-ltr][data-rtl]').forEach(function(el){
+        el.textContent=val==='rtl'?el.dataset.rtl:el.dataset.ltr;
+      });
+      var dirBtn=document.getElementById('btn-dir');
+      if(dirBtn)dirBtn.textContent=val==='rtl'?'LTR':'RTL';
+      try{localStorage.setItem('doc-dir:'+location.pathname,val)}catch(e){}
+    });
+
+    // Accent swatches
+    var accentContainer=document.getElementById('set-accent');
+    if(accentContainer)accentContainer.addEventListener('click',function(e){
+      var sw=e.target.closest('.settings-swatch');if(!sw)return;
+      currentSettings.accent=sw.dataset.color;
+      applySettings(currentSettings);debouncedSave(currentSettings);
+    });
+
+    // Auto color mode listener
+    if(window.matchMedia){
+      window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){
+        if(currentSettings.colorMode==='auto')applySettings(currentSettings);
+      });
+    }
+  }
+
+  function bindRange(inputId,valId,prop,unit,parse){
+    var input=document.getElementById(inputId);
+    var valEl=document.getElementById(valId);
+    if(!input)return;
+    input.addEventListener('input',function(){
+      var v=parse(this.value);
+      currentSettings[prop]=v;
+      if(valEl)valEl.textContent=v+unit;
+      applySettings(currentSettings);debouncedSave(currentSettings);
+      // If density-related, switch preset to match or custom
+      if(prop==='pSpacing'||prop==='hTop'||prop==='hBottom'||prop==='maxWidth'){
+        var matched=false;
+        for(var k in DENSITY_PRESETS){
+          var d=DENSITY_PRESETS[k];
+          if(parseFloat(d.pSpacing)===currentSettings.pSpacing&&parseFloat(d.hTop)===currentSettings.hTop&&parseFloat(d.hBottom)===currentSettings.hBottom&&parseInt(d.maxWidth)===currentSettings.maxWidth){
+            currentSettings.densityPreset=k;matched=true;break;
+          }
+        }
+        if(!matched)currentSettings.densityPreset='custom';
+        syncSeg('set-density',currentSettings.densityPreset);
+      }
+    });
+  }
+
+  function bindSeg(id,callback){
+    var el=document.getElementById(id);if(!el)return;
+    el.addEventListener('click',function(e){
+      var btn=e.target.closest('button[data-val]');if(!btn)return;
+      el.querySelectorAll('button').forEach(function(b){b.classList.remove('active')});
+      btn.classList.add('active');
+      callback(btn.dataset.val);
+    });
+  }
+
+  // ── Init ──
+  applySettings(currentSettings);
+  initSettingsPanel();
+})();
+</script>
+"""
+
+
 # ─── Config loading ──────────────────────────────────────────────────────────
 
 def load_config(start_dir, title=''):
@@ -803,11 +1250,11 @@ UNIFIED_TEMPLATE = """\
 <link rel="stylesheet" id="hljs-dark" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
 <link rel="stylesheet" id="hljs-light" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css" disabled>
 <style>
-:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#1E1E1E;--code-text:#d4d4d4;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb}
+:root{--bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--muted:#6b7280;--accent:#2563eb;--accent-light:#dbeafe;--border:#e5e7eb;--code-bg:#1E1E1E;--code-text:#d4d4d4;--radius:8px;--header-from:#1e3a5f;--header-to:#2563eb;--body-font:'Inter',sans-serif;--heading-font:'Inter',sans-serif;--code-font:'JetBrains Mono',monospace;--base-size:14px;--line-height:1.4;--p-spacing:0.45rem;--h-top-margin:2.5rem;--h-bottom-margin:0.4rem;--content-max-width:860px}
 [dir="rtl"]{--code-bg:#f5f5f5;--code-text:#1a1a2e}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'{{FONT_LATIN}}',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
-[dir="rtl"] body{font-family:'{{FONT_HEBREW}}',system-ui,sans-serif;line-height:1.8}
+body{font-family:var(--body-font),system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:var(--base-size);line-height:var(--line-height)}
+[dir="rtl"] body{font-family:var(--body-font),system-ui,sans-serif;line-height:1.8}
 
 /* ── Header ── */
 .site-header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,var(--header-from),var(--header-to));color:#fff;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -882,20 +1329,20 @@ body{font-family:'{{FONT_LATIN}}',system-ui,sans-serif;background:var(--bg);colo
 [dir="rtl"] .toc-toggle{right:auto;left:1.5rem}
 
 /* ── Content ── */
-.content{padding:2.5rem 3.5rem;max-width:860px}
+.content{padding:2.5rem 3.5rem;max-width:var(--content-max-width)}
 .doc-header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:2px solid var(--border)}
 .doc-header h1{font-size:2rem;font-weight:700;margin-bottom:.4rem;color:var(--text)}
 .subtitle{color:var(--muted);font-size:1.05rem}
 .date{color:var(--muted);font-size:.8rem;margin-top:.4rem}
 
 /* ── Typography ── */
-h2{font-size:1.4rem;font-weight:600;margin:2.5rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--accent-light)}
-h3{font-size:1.15rem;font-weight:600;margin:1.75rem 0 .75rem}
-h4{font-size:1rem;font-weight:600;margin:1.25rem 0 .5rem}
-p{margin-bottom:1rem}
+h2{font-family:var(--heading-font);font-size:1.4rem;font-weight:600;margin:var(--h-top-margin) 0 1rem;padding-bottom:var(--h-bottom-margin);border-bottom:2px solid var(--accent-light)}
+h3{font-family:var(--heading-font);font-size:1.15rem;font-weight:600;margin:var(--h-top-margin) 0 .75rem}
+h4{font-family:var(--heading-font);font-size:1rem;font-weight:600;margin:1.25rem 0 var(--h-bottom-margin)}
+p{margin-bottom:var(--p-spacing)}
 a{color:var(--accent)}
 ul,ol{margin:0 0 1rem 1.5rem}
-li{margin-bottom:.35rem}
+li{margin-bottom:var(--p-spacing)}
 li input[type="checkbox"]{margin-right:.4rem}
 ul.checklist{list-style:none;padding-left:0}
 ul.checklist li{display:flex;align-items:baseline;gap:.4rem;padding:.25rem 0}
@@ -909,7 +1356,7 @@ blockquote{border-left:3px solid var(--accent);padding:.75rem 1rem;margin:1rem 0
 
 /* ── Code ── */
 pre{background:var(--code-bg);color:var(--code-text);padding:1.15rem 1.25rem;border-radius:var(--radius);overflow-x:auto;margin:1rem 0;font-size:.85rem;box-shadow:inset 0 1px 3px rgba(0,0,0,.2)}
-code{font-family:'JetBrains Mono',monospace;font-size:.85em}
+code{font-family:var(--code-font);font-size:.85em}
 p code,li code{background:#e8eaed;color:#c7254e;padding:.15rem .4rem;border-radius:4px}
 pre code{background:transparent;color:inherit;padding:0}
 [dir="rtl"] pre{direction:ltr;text-align:left;box-shadow:none;border:1px solid var(--border)}
@@ -946,6 +1393,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 }
 {{DIAGRAM_CSS}}
 {{NOTES_CSS}}
+{{SETTINGS_CSS}}
 </style>
 </head>
 <body>
@@ -966,6 +1414,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
       <button onclick="setLayout('wide')" id="btn-wide" data-ltr="Wide" data-rtl="&#1512;&#1495;&#1489;">{{WIDE_LABEL}}</button>
       <button onclick="setLayout('fluid')" id="btn-fluid" data-ltr="Full" data-rtl="&#1502;&#1500;&#1488;">{{FULL_LABEL}}</button>
     </div>
+    {{SETTINGS_GEAR}}
   </div>
 </header>
 <div class="page">
@@ -989,6 +1438,7 @@ img{max-width:100%;border-radius:var(--radius);margin:1rem 0}
 </div>
 </main>
 </div>
+{{SETTINGS_HTML}}
 <button class="toc-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle table of contents">&#128209;</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
@@ -1074,6 +1524,7 @@ mermaid.initialize({startOnLoad:true,theme:document.documentElement.dir==='rtl'?
 </script>
 {{DIAGRAM_SCRIPTS}}
 {{NOTES_JS}}
+{{SETTINGS_JS}}
 </body>
 </html>
 """
@@ -1673,6 +2124,10 @@ def convert_file(md_path: str) -> str:
              .replace('{{DIAGRAM_SCRIPTS}}', DIAGRAM_SCRIPTS if has_diagrams else '')
              .replace('{{NOTES_CSS}}', NOTES_CSS if config.get('enableNotes', True) else '')
              .replace('{{NOTES_JS}}', NOTES_JS if config.get('enableNotes', True) else '')
+             .replace('{{SETTINGS_CSS}}', SETTINGS_PANEL_CSS if config.get('enableSettings', True) else '')
+             .replace('{{SETTINGS_GEAR}}', SETTINGS_GEAR_HTML if config.get('enableSettings', True) else '')
+             .replace('{{SETTINGS_HTML}}', SETTINGS_BODY_HTML if config.get('enableSettings', True) else '')
+             .replace('{{SETTINGS_JS}}', SETTINGS_PANEL_JS if config.get('enableSettings', True) else '')
              .replace('{{DIR}}', 'rtl' if is_rtl else 'ltr')
              .replace('{{LANG}}', 'he' if is_rtl else 'en'))
 

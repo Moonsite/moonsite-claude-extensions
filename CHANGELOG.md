@@ -6,6 +6,47 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.3.4] — 2026-03-14
+
+### md-html-docs 2.5.0
+- Add document settings panel with slide-out UI (Typography, Density, Colors, More tabs)
+- Dark mode support with full element restyling
+- Font presets (Noto, IBM Plex, Inter/Heebo, Serif, Monospace) with dynamic Google Fonts loading
+- Density presets (compact, comfortable, spacious) with live preview
+- Per-document and global default settings via localStorage persistence
+- CSS variables for all typography, spacing, and color values
+- Responsive bottom-sheet on mobile, RTL-aware layout
+- Configurable via `enableSettings` in `.claude/md-html-docs.json`
+
+### moonsite-skills 1.0.4
+- Add per-plugin CHANGELOG.md generation to `/publish` skill (Step 5.5)
+- Update `/bump-release` skill to maintain per-plugin changelogs
+
+### jira-autopilot 4.1.1
+- Add per-plugin CHANGELOG.md with full version history backfill
+
+### persona-panel 1.2.3
+- Add per-plugin CHANGELOG.md with full version history backfill
+
+## [1.3.3] — 2026-03-14
+
+### jira-autopilot 4.1.0
+- Add statusLine command script for rich Claude Code status bar (git, Jira, context, cost segments)
+- Add setup step for status bar configuration
+
+## [1.3.2] — 2026-03-13
+
+### persona-panel 1.2.2
+- Add Gemini provider support (review, synthesize, call-llm)
+- Add persistent cost logging to `~/.persona-panel/cost-log.jsonl`
+- Add `/persona-costs` command for cost breakdown
+- Fix HTML-instead-of-JSON API error handling
+- `loadEnv()` now cascades: project `.env` -> cwd `.env` -> `~/.env`
+
+### moonsite-skills 1.0.3
+- Add `/publish` skill for marketplace-wide releases
+- Sync plugin.json version field
+
 ## [1.3.1] — 2026-03-12
 
 ### persona-panel 1.0.1
