@@ -8,3 +8,4 @@
 .claude/jira-autopilot.declined
 .claude/persona-panel-costs.jsonl
 __pycache__/
+*.html
