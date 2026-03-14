@@ -6,6 +6,11 @@ Format: each release groups changes by plugin. Versions follow [SemVer](https://
 
 ---
 
+## [1.3.5] — 2026-03-14
+
+### md-html-docs 2.5.1
+- Fix TOC sidebar showing raw markdown formatting instead of clean text
+
 ## [1.3.4] — 2026-03-14
 
 ### md-html-docs 2.5.0

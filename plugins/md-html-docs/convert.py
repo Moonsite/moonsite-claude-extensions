@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-PLUGIN_VERSION = '2.5.0'
+PLUGIN_VERSION = '2.5.1'
 
 # Default font families
 DEFAULT_FONT_LATIN = 'Inter'
@@ -1903,7 +1903,7 @@ def md_to_html(md: str) -> tuple:
                 i += 1
                 continue
             if level >= 2:
-                headings.append((level, text, slug))
+                headings.append((level, strip_md(text), slug))
             out.append(f'<h{level} id="{slug}">{processed}</h{level}>')
             i += 1
             continue

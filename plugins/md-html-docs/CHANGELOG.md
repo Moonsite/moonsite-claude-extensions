@@ -4,6 +4,10 @@ All notable changes to **md-html-docs** are documented here.
 
 ---
 
+## [2.5.1] — 2026-03-14
+
+- Fix TOC sidebar showing raw markdown formatting (`**`, `_`, etc.) instead of clean text
+
 ## [2.5.0] — 2026-03-14
 
 - Add document settings panel with slide-out UI (gear icon in header)
